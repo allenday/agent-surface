@@ -13,7 +13,7 @@ from agent_surface import (
     ReferenceRegistry,
     RenderOptions,
 )
-from agent_surface.adapters.click import ClickAdapter
+from agent_surface.adapters.click import ClickAdapter, CliDefinitionError
 
 
 class EchoRequest(BaseModel):
@@ -218,6 +218,16 @@ def test_oversized_success_becomes_a_structured_size_error() -> None:
 
     assert result.exit_code == 70
     assert document["error"]["code"] == "response_too_large"
+
+
+def test_click_adapter_rejects_budget_too_small_for_structured_errors() -> None:
+    with pytest.raises(CliDefinitionError) as raised:
+        ClickAdapter(
+            echo_app(),
+            render_options=RenderOptions(budget=OutputBudget(max_bytes=100)),
+        )
+
+    assert getattr(raised.value, "code", None) == "cli_budget_too_small"
 
 
 def test_sensitive_values_are_redacted_from_every_output_view() -> None:
@@ -444,6 +454,26 @@ def test_sensitive_domain_error_mapping_is_recursively_redacted() -> None:
 
     assert result.exit_code == 4
     assert "consumer-secret" not in result.output
+
+
+def test_sensitive_typed_scalar_in_arbitrary_detail_key_is_redacted() -> None:
+    class Request(BaseModel):
+        pin: int = Field(json_schema_extra={"sensitive": True})
+
+    app = App("vault")
+
+    @app.operation("pins.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "pin_rejected",
+            "PIN rejected",
+            details=({"context": {"provided": request.pin}},),
+        )
+
+    result, _ = invoke_json(app, ["pins", "inspect", "--pin", "123456"])
+
+    assert result.exit_code == 4
+    assert "123456" not in result.output
 
 
 def test_error_command_is_compacted_only_after_budget_failure() -> None:

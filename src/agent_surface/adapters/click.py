@@ -27,7 +27,7 @@ from agent_surface.operations import (
     OperationRegistry,
 )
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome
-from agent_surface.references import ReferenceError, ReferenceRegistry
+from agent_surface.references import ReferenceError, ReferenceRegistry, encode_scalar
 from agent_surface.rendering import RenderOptions, render, render_envelope
 
 CliParameterKind = Literal["argument", "option"]
@@ -37,6 +37,7 @@ _RESERVED_ROOTS = frozenset({"actions", "operations"})
 _RESERVED_FIELDS = frozenset({"format", "yaml_style"})
 _RAW_ARGV_KEY = "agent_surface.raw_argv"
 _REDACTED = "<redacted>"
+_MIN_CLI_BYTES = 1_024
 
 
 class CliDefinitionError(Exception):
@@ -269,6 +270,12 @@ class ClickAdapter:
         self._references = references or ReferenceRegistry()
         self._action_provider = action_provider or NoActions()
         self._render_options = render_options or RenderOptions()
+        if self._render_options.budget.max_bytes < _MIN_CLI_BYTES:
+            raise CliDefinitionError(
+                "cli_budget_too_small",
+                f"Click output budget must be at least {_MIN_CLI_BYTES} bytes",
+                fix="Raise max_bytes so a structured error envelope can always be emitted.",
+            )
         self._argv_provider = argv_provider
         self._plans = CliPlanCompiler(
             app.operations,
@@ -862,7 +869,7 @@ class ClickAdapter:
                     update={
                         "budget": OutputBudget(
                             max_items=max(20, options.budget.max_items),
-                            max_bytes=max(4_096, options.budget.max_bytes),
+                            max_bytes=options.budget.max_bytes,
                         )
                     }
                 )
@@ -978,6 +985,13 @@ class ClickAdapter:
                 return [redact(item) for item in value]
             if isinstance(value, str):
                 return _redact_text(value, secrets)
+            lexical: str | None
+            try:
+                lexical = encode_scalar(value)
+            except ReferenceError:
+                lexical = str(value) if isinstance(value, Path) else None
+            if lexical is not None and lexical in secrets:
+                return _REDACTED
             return value
 
         details = []

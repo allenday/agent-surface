@@ -38,6 +38,9 @@ before dispatching into the group.
 
 Errors include a stable code, message, repair guidance when available, and bounded next actions.
 Oversized successes become complete structured size errors; output is never silently truncated.
+The Click adapter requires `max_bytes >= 1024`, the minimum reserved for its structured emergency
+error envelope. Smaller budgets fail adapter construction with `cli_budget_too_small` rather than
+being silently exceeded at runtime.
 
 ## Discovery
 
