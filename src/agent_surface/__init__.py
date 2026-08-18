@@ -4,6 +4,7 @@ __version__ = "0.1.0"
 
 from agent_surface.actions import (
     ActionCandidate,
+    ActionCatalog,
     ActionCompiler,
     ActionDefinitionError,
     ActionPolicy,
@@ -11,6 +12,7 @@ from agent_surface.actions import (
     ActionSlotPlan,
     AllowActions,
     DenyAllActions,
+    InvalidActionCursor,
     action,
 )
 from agent_surface.app import App
@@ -40,6 +42,7 @@ from agent_surface.skills import bundled_skill_path
 __all__ = [
     "Action",
     "ActionCandidate",
+    "ActionCatalog",
     "ActionCollection",
     "ActionCompiler",
     "ActionDefinitionError",
@@ -55,6 +58,7 @@ __all__ = [
     "ErrorEnvelope",
     "ErrorInfo",
     "InvalidReference",
+    "InvalidActionCursor",
     "MissingReferenceCodec",
     "OperationError",
     "OutputBudget",

@@ -1,11 +1,14 @@
 """Narrow action-candidate compilation and bounded discovery."""
 
+import base64
+import binascii
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, get_type_hints
 
-from agent_surface.contracts import Action
+from agent_surface.budgets import OutputBudget
+from agent_surface.contracts import Action, ActionCollection
 from agent_surface.operations import OperationRegistry, UnknownOperationError
 from agent_surface.references import MissingReferenceCodec, ReferenceRegistry, encode_scalar
 
@@ -293,8 +296,93 @@ def _annotation_name(annotation: Any) -> str:
     return getattr(annotation, "__name__", str(annotation))
 
 
+class InvalidActionCursor(Exception):
+    code = "invalid_action_cursor"
+
+    def __init__(self, cursor: str) -> None:
+        super().__init__("Action cursor is invalid or out of range")
+        self.cursor = cursor
+        self.fix = "Restart discovery without a cursor."
+
+
+class ActionCatalog:
+    """Deterministic in-memory pages of already policy-filtered actions."""
+
+    def __init__(
+        self,
+        actions: tuple[Action, ...],
+        *,
+        discovery_command: tuple[str, ...] = ("actions", "list"),
+    ) -> None:
+        self._actions = tuple(sorted(actions, key=_action_sort_key))
+        self._discovery_command = discovery_command
+
+    def page(
+        self,
+        *,
+        cursor: str | None = None,
+        budget: OutputBudget | None = None,
+    ) -> ActionCollection:
+        selected = budget or OutputBudget()
+        offset = 0 if cursor is None else self._decode_cursor(cursor)
+        if cursor is not None and offset >= len(self._actions):
+            raise InvalidActionCursor(cursor)
+
+        items = self._actions[offset : offset + selected.max_items]
+        next_offset = offset + len(items)
+        truncated = next_offset < len(self._actions)
+        discover = None
+        if truncated:
+            discover = Action(
+                rel="next-page",
+                description="Return the next page of available actions",
+                command=(
+                    *self._discovery_command,
+                    "--cursor",
+                    self._encode_cursor(next_offset),
+                    "--limit",
+                    str(selected.max_items),
+                ),
+            )
+        return ActionCollection(
+            items=items,
+            total=len(self._actions),
+            returned=len(items),
+            truncated=truncated,
+            discover=discover,
+        )
+
+    @staticmethod
+    def _encode_cursor(offset: int) -> str:
+        encoded = base64.urlsafe_b64encode(f"v1:{offset}".encode()).decode()
+        return encoded.rstrip("=")
+
+    @staticmethod
+    def _decode_cursor(cursor: str) -> int:
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.b64decode(
+                cursor + padding,
+                altchars=b"-_",
+                validate=True,
+            ).decode()
+            version, raw_offset = decoded.split(":", 1)
+            offset = int(raw_offset)
+            if version != "v1" or offset < 0:
+                raise ValueError
+            return offset
+        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
+            raise InvalidActionCursor(cursor) from error
+
+
+def _action_sort_key(action_value: Action) -> tuple[str, str, tuple[str, ...]]:
+    command = action_value.command or action_value.command_template or ()
+    return action_value.operation or "", action_value.rel, command
+
+
 __all__ = [
     "ActionCandidate",
+    "ActionCatalog",
     "ActionCompiler",
     "ActionDefinitionError",
     "ActionPolicy",
@@ -302,5 +390,6 @@ __all__ = [
     "ActionSlotPlan",
     "AllowActions",
     "DenyAllActions",
+    "InvalidActionCursor",
     "action",
 ]
