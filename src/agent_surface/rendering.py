@@ -43,7 +43,7 @@ def render(value: Any, *, options: RenderOptions | None = None) -> str:
 
     selected = options or RenderOptions()
     structural_sequences = _structural_sequence_paths(value)
-    normalized = _JSON_VALUE.dump_python(value, mode="json")
+    normalized = _JSON_VALUE.dump_python(value, mode="json", exclude_none=True)
     _validate_item_budget(normalized, selected.budget, structural_sequences)
     if selected.format == "json":
         document = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"

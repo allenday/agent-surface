@@ -270,3 +270,12 @@ def test_render_envelope_reraises_original_error_when_fallback_cannot_fit() -> N
     assert raised.value.code == "response_too_large"
     assert raised.value.details["max_bytes"] == 1
     assert raised.value.details["measured_bytes"] > 1
+
+
+def test_unset_optional_contract_fields_are_omitted_from_documents() -> None:
+    action = Action(rel="inspect", command=("books", "inspect", "book_dune"))
+
+    document = render(action)
+
+    assert "command_template" not in document
+    assert "target" not in document
