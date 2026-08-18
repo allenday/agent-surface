@@ -32,6 +32,7 @@ CliParameterKind = Literal["argument", "option"]
 CliValueKind = Literal["boolean", "float", "integer", "path", "reference", "string"]
 
 _RESERVED_ROOTS = frozenset({"actions", "operations"})
+_RESERVED_FIELDS = frozenset({"format", "yaml_style"})
 _RAW_ARGV_KEY = "agent_surface.raw_argv"
 _REDACTED = "<redacted>"
 
@@ -106,6 +107,7 @@ class CliPlanCompiler:
             for name, field in definition.input_model.model_fields.items()
         )
         self._validate_arguments(definition.name, fields)
+        self._validate_transport_fields(definition, fields)
         return CliCommandPlan(
             operation=definition.name,
             path=path,
@@ -213,6 +215,28 @@ class CliPlanCompiler:
                 )
 
     @staticmethod
+    def _validate_transport_fields(
+        definition: OperationDefinition,
+        fields: tuple[CliFieldPlan, ...],
+    ) -> None:
+        for field in fields:
+            if field.name in _RESERVED_FIELDS:
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    f"Field conflicts with a generated rendering option: {field.name}",
+                    fix=f"Rename {field.name}; --format and --yaml-style belong to the adapter.",
+                )
+            if definition.destructive and field.name == "confirm" and field.value_kind != "boolean":
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    "Destructive operation field confirm must be boolean",
+                    fix=(
+                        "Declare confirm as bool or remove it and use the generated "
+                        "--confirm flag."
+                    ),
+                )
+
+    @staticmethod
     def _unsupported(name: str, reason: str) -> CliDefinitionError:
         return CliDefinitionError(
             "unsupported_cli_field",
@@ -246,13 +270,19 @@ class ClickAdapter:
             name=self._app.name,
             help=f"{self._app.name} agent surface",
             context_settings={"help_option_names": ["-h", "--help"]},
+            adapter=self,
+            path=(),
         )
         for plan in self._plans:
             parent: click.Group = root
-            for segment in plan.path[:-1]:
+            for index, segment in enumerate(plan.path[:-1]):
                 existing = parent.commands.get(segment)
                 if existing is None:
-                    group = click.Group(name=segment)
+                    group = _SurfaceGroup(
+                        name=segment,
+                        adapter=self,
+                        path=plan.path[: index + 1],
+                    )
                     parent.add_command(group)
                     parent = group
                 elif isinstance(existing, click.Group):
@@ -540,6 +570,7 @@ class ClickAdapter:
                     fix="Retry with --confirm after reviewing the target.",
                 ),
                 exit_code=3,
+                operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
             )
@@ -567,6 +598,7 @@ class ClickAdapter:
                 command,
                 self._redact_error(error, plan),
                 exit_code=2,
+                operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
             )
@@ -575,6 +607,7 @@ class ClickAdapter:
                 command,
                 error,
                 exit_code=70,
+                operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
             )
@@ -583,6 +616,7 @@ class ClickAdapter:
                 command,
                 error,
                 exit_code=4,
+                operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
             )
@@ -715,6 +749,32 @@ class ClickAdapter:
             yaml_style=yaml_style,
         )
 
+    def _emit_group_parse_error(
+        self,
+        context: click.Context,
+        path: tuple[str, ...],
+        error: click.UsageError,
+    ) -> typing.Never:
+        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
+        document_format, yaml_style = _render_choices_from_raw(raw)
+        code = (
+            "unknown_command"
+            if "No such command" in error.format_message()
+            else "invalid_command"
+        )
+        self._emit_error(
+            CommandView(raw=raw, parsed=ParsedCommand(path=path)),
+            OperationError(
+                code,
+                error.format_message(),
+                fix=f"Run {self._app.name} operations list to discover valid commands.",
+            ),
+            exit_code=2,
+            operation=".".join(path),
+            document_format=document_format,
+            yaml_style=yaml_style,
+        )
+
     def _selected_render_options(self, document_format: str, yaml_style: str) -> RenderOptions:
         return self._render_options.model_copy(
             update={"format": document_format, "yaml_style": yaml_style}
@@ -755,6 +815,17 @@ def build_click_group(
 
 
 class _SurfaceGroup(click.Group):
+    def __init__(
+        self,
+        *args: Any,
+        adapter: ClickAdapter,
+        path: tuple[str, ...],
+        **kwargs: Any,
+    ) -> None:
+        self._adapter = adapter
+        self._path = path
+        super().__init__(*args, **kwargs)
+
     def make_context(
         self,
         info_name: str | None,
@@ -766,6 +837,16 @@ class _SurfaceGroup(click.Group):
         context = super().make_context(info_name, args, parent=parent, **extra)
         context.meta.setdefault(_RAW_ARGV_KEY, raw)
         return context
+
+    def resolve_command(
+        self,
+        ctx: click.Context,
+        args: list[str],
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as error:
+            self._adapter._emit_group_parse_error(ctx, self._path, error)
 
 
 class _SurfaceCommand(click.Command):

@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from click.testing import CliRunner
 from pydantic import BaseModel, Field
 
-from agent_surface import App, OperationError, OutputBudget, ReferenceRegistry, RenderOptions
+from agent_surface import (
+    ActionCollection,
+    App,
+    OperationError,
+    OutputBudget,
+    ReferenceRegistry,
+    RenderOptions,
+)
 from agent_surface.adapters.click import ClickAdapter
 
 
@@ -170,6 +177,24 @@ def test_click_parse_error_is_a_repairable_structured_document() -> None:
     assert document["fix"]
 
 
+def test_unknown_nested_command_is_a_repairable_structured_document() -> None:
+    command = ClickAdapter(echo_app()).command()
+
+    result = CliRunner().invoke(command, ["message", "missing", "--format", "json"])
+    document = json.loads(result.stdout)
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "unknown_command"
+    assert document["command"]["raw"] == [
+        "echo",
+        "message",
+        "missing",
+        "--format",
+        "json",
+    ]
+    assert document["fix"]
+
+
 def test_unexpected_failure_is_structured_without_private_details() -> None:
     result, document = invoke_json(
         echo_app(),
@@ -241,3 +266,42 @@ def test_destructive_operation_requires_confirmation_before_handler_runs() -> No
     assert allowed.exit_code == 0
     assert allowed_document["result"] == {"changed": True}
     assert calls == 1
+
+
+def test_error_action_provider_receives_the_invoked_operation() -> None:
+    class RecordingActions:
+        def __init__(self) -> None:
+            self.operations: list[str] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            if error is not None:
+                self.operations.append(operation)
+            return ActionCollection()
+
+        def list_actions(
+            self,
+            *,
+            cursor: str | None = None,
+            budget: OutputBudget | None = None,
+        ) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = RecordingActions()
+
+    result, _ = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "missing"],
+        action_provider=actions,
+    )
+
+    assert result.exit_code == 4
+    assert actions.operations == ["message.echo"]

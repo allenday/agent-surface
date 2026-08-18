@@ -55,7 +55,7 @@ def test_operations_list_is_bounded_and_every_page_is_reachable() -> None:
         assert page["total"] == 45
         names.extend(item["name"] for item in page["items"])
         if not page["truncated"]:
-            assert page["continuation"] is None
+            assert "continuation" not in page
             break
         continuation = page["continuation"]["command"]
         assert continuation[:3] == ["catalog", "operations", "list"]

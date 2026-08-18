@@ -154,3 +154,34 @@ def test_unregistered_nested_model_fails_instead_of_stringifying() -> None:
         CliPlanCompiler(app_for(NestedRequest).operations).compile()
 
     assert raised.value.code == "unsupported_cli_field"
+
+
+@pytest.mark.parametrize("field_name", ["format", "yaml_style"])
+def test_framework_render_option_names_fail_during_compilation(field_name: str) -> None:
+    conflicting_request = type(
+        "ConflictingRequest",
+        (BaseModel,),
+        {"__annotations__": {field_name: str}},
+    )
+
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app_for(conflicting_request).operations).compile()
+
+    assert raised.value.code == "cli_parameter_conflict"
+
+
+def test_destructive_confirm_field_must_be_boolean() -> None:
+    class InvalidConfirmationRequest(BaseModel):
+        target: str
+        confirm: str
+
+    app = App("danger")
+
+    @app.operation("items.delete", destructive=True)
+    def delete(request: InvalidConfirmationRequest) -> Result:
+        return Result(status=request.target)
+
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app.operations).compile()
+
+    assert raised.value.code == "cli_parameter_conflict"
