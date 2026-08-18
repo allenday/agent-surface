@@ -35,6 +35,7 @@ uv build
 - `src/agent_surface/app.py`: public application/decorator API
 - `src/agent_surface/skills/`: bundled `SKILL.md`, `reference.md`, and future sidecars
 - `tests/`: executable behavior and package-resource contracts
+- `docs/adoption.md`: consumer domain/integration/transport boundary
 - `docs/plans/`: approved designs and implementation plans
 
 ## Implementation rules
@@ -50,6 +51,7 @@ uv build
   explicit policy decides which actions are published.
 - Never use `str(object)` as a stable reference. Use an explicit reference codec.
 - Keep Click and MCP adapters thin; business logic belongs in the shared operation layer.
+- Project CLI and MCP as siblings from the registry; never implement one transport through another.
 - Preserve bundled skill sidecars as package data. When they change, test both source access and
   built-wheel contents.
 - Do not commit `.venv/`, `dist/`, caches, credentials, or generated artifacts.

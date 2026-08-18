@@ -94,6 +94,25 @@ def test_public_project_sidecars_exist() -> None:
         assert required in release_guide
 
 
+def test_adoption_boundary_is_documented_and_linked() -> None:
+    guide_path = ROOT / "docs" / "adoption.md"
+    assert guide_path.is_file()
+
+    guide = guide_path.read_text()
+    readme = (ROOT / "README.md").read_text()
+    agent_guide = (ROOT / "AGENTS.md").read_text()
+    assert "docs/adoption.md" in readme
+    assert "docs/adoption.md" in agent_guide
+    for required in (
+        "consumer-owned",
+        "integration layer",
+        "OperationError",
+        "sensitive",
+        "transport",
+    ):
+        assert required in guide
+
+
 def test_github_contributor_templates_are_structured_and_parseable() -> None:
     bug = load_yaml(".github/ISSUE_TEMPLATE/bug.yml")
     feature = load_yaml(".github/ISSUE_TEMPLATE/feature.yml")

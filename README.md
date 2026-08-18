@@ -65,7 +65,8 @@ transport-specific contracts.
 - one typed source of truth across CLI, MCP, and schema adapters
 
 See the [validated design](docs/plans/2026-08-18-agent-surface-design.md),
-[contribution guide](CONTRIBUTING.md), and [release guide](docs/releasing.md).
+[adoption boundary](docs/adoption.md), [contribution guide](CONTRIBUTING.md), and
+[release guide](docs/releasing.md).
 
 ## License
 
