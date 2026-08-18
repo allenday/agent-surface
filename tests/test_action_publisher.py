@@ -2,9 +2,12 @@ from dataclasses import dataclass, replace
 from typing import Annotated, Literal
 
 import pytest
+from pydantic import BaseModel, Field
 
+from agent_surface import App
 from agent_surface.actions import (
     ActionCandidate,
+    ActionCompiler,
     ActionPublisher,
     ActionSlotPlan,
     AllowActions,
@@ -89,6 +92,41 @@ def test_binding_precedence_is_explicit_then_exact_name_then_default() -> None:
     assert contextual.command is not None
     assert contextual.command[3] == "from-context"
     assert contextual.bound == {"ref": "from-context", "count": 2}
+
+
+def test_dependent_pydantic_default_factory_runs_after_prior_slots_resolve() -> None:
+    class FactoryInput(BaseModel):
+        prefix: str
+        ref: str = Field(default_factory=lambda data: f"{data['prefix']}-resource")
+
+    class FactoryResult(BaseModel):
+        status: str
+
+    app = App("factory")
+
+    @app.operation("resource.factory")
+    def factory(request: FactoryInput) -> FactoryResult:
+        return FactoryResult(status=request.ref)
+
+    candidates = ActionCompiler(app.operations).compile_operations()
+    publisher = ActionPublisher(
+        references=ReferenceRegistry(),
+        policy=AllowActions(frozenset({"resource.factory"})),
+    )
+
+    resolved = publisher.publish(candidates, values={"prefix": "custom"})[0]
+    unresolved = publisher.publish(candidates)[0]
+
+    assert resolved.command == (
+        "resource",
+        "factory",
+        "--prefix",
+        "custom",
+        "--ref",
+        "custom-resource",
+    )
+    assert unresolved.command is None
+    assert unresolved.command_template[-1] == "{ref}"  # type: ignore[index]
 
 
 def test_same_type_wrong_name_stays_unbound_and_does_not_scan_properties() -> None:

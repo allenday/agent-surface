@@ -105,9 +105,16 @@ def test_undecorated_subclass_override_suppresses_decorated_base_method() -> Non
     assert candidates == ()
 
 
-def test_pydantic_default_factory_is_materialized_as_the_slot_default() -> None:
+def test_pydantic_default_factory_is_preserved_without_execution() -> None:
+    calls = 0
+
+    def generate_ref() -> str:
+        nonlocal calls
+        calls += 1
+        return "generated-ref"
+
     class FactoryInput(BaseModel):
-        ref: str = Field(default_factory=lambda: "generated-ref")
+        ref: str = Field(default_factory=generate_ref)
 
     app = App("factory")
 
@@ -118,7 +125,7 @@ def test_pydantic_default_factory_is_materialized_as_the_slot_default() -> None:
     candidate = ActionCompiler(app.operations).compile_operations()[0]
 
     assert candidate.slots[0].required is False
-    assert candidate.slots[0].default == "generated-ref"
+    assert calls == 0
 
 
 @pytest.mark.parametrize("case", ["variadic", "unannotated", "unknown"])

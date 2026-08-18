@@ -9,6 +9,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, get_args, get_origin, get_type_hints
 
+from pydantic.fields import FieldInfo
+
 from agent_surface.budgets import OutputBudget
 from agent_surface.contracts import Action, ActionCollection
 from agent_surface.operations import OperationRegistry, UnknownOperationError
@@ -16,6 +18,21 @@ from agent_surface.references import MissingReferenceCodec, ReferenceRegistry, e
 
 _ACTION_METADATA = "__agent_surface_action__"
 _MISSING = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _DefaultFactory:
+    field: FieldInfo
+
+    @property
+    def needs_validated_data(self) -> bool:
+        return self.field.default_factory_takes_validated_data is True
+
+    def resolve(self, validated_data: dict[str, Any]) -> Any:
+        return self.field.get_default(
+            call_default_factory=True,
+            validated_data=validated_data,
+        )
 
 
 class ActionDefinitionError(Exception):
@@ -87,7 +104,11 @@ class ActionCompiler:
                     default=(
                         _MISSING
                         if field.is_required()
-                        else field.get_default(call_default_factory=True, validated_data={})
+                        else (
+                            _DefaultFactory(field)
+                            if field.default_factory is not None
+                            else field.default
+                        )
                     ),
                 )
                 for name, field in definition.input_model.model_fields.items()
@@ -229,14 +250,23 @@ class ActionPublisher:
         safe_values = self._safe_values(candidate.context)
         argv = list(candidate.operation.split("."))
         bound: dict[str, Any] = {}
+        validated_data: dict[str, Any] = {}
         slots: dict[str, Any] = {}
         unresolved = False
+        prior_slots_resolved = True
 
         for slot in candidate.slots:
             argv.append(f"--{slot.name.replace('_', '-')}")
-            found, value = self._bound_value(slot, explicit, safe_values)
+            found, value = self._bound_value(
+                slot,
+                explicit,
+                safe_values,
+                validated_data,
+                prior_slots_resolved,
+            )
             if not found:
                 unresolved = True
+                prior_slots_resolved = False
                 argv.append(f"{{{slot.name}}}")
                 descriptor: dict[str, Any] = {
                     "type": _annotation_name(slot.annotation),
@@ -247,6 +277,7 @@ class ActionPublisher:
                 slots[slot.name] = descriptor
                 continue
 
+            validated_data[slot.name] = value
             token, structured = self._encode_bound(value)
             argv.append(token)
             bound[slot.name] = structured
@@ -277,11 +308,17 @@ class ActionPublisher:
         slot: ActionSlotPlan,
         explicit: dict[str, Any],
         safe_values: dict[str, Any],
+        validated_data: dict[str, Any],
+        prior_slots_resolved: bool,
     ) -> tuple[bool, Any]:
         if slot.name in explicit and _compatible(slot.annotation, explicit[slot.name]):
             return True, explicit[slot.name]
         if slot.name in safe_values and _compatible(slot.annotation, safe_values[slot.name]):
             return True, safe_values[slot.name]
+        if isinstance(slot.default, _DefaultFactory):
+            if slot.default.needs_validated_data and not prior_slots_resolved:
+                return False, None
+            return True, slot.default.resolve(validated_data)
         if slot.default is not _MISSING:
             return True, slot.default
         return False, None

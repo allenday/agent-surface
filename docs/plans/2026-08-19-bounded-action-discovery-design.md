@@ -208,4 +208,3 @@ Tests will cover:
 - 400-action fixtures returning bounded pages with only immediate continuation
 - cursor validation, complete reachability, item budgets, byte budgets, YAML round trips, and no
   ellipsis placeholders
-

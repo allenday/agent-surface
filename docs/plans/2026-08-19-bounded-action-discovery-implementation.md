@@ -116,4 +116,3 @@ the resulting transport-neutral `Action` models.
    test and rerun `make check`.
 8. Fast-forward `main`, rerun `make check`, push, watch GitHub Actions, and close issue #4 only after
    Python 3.12–3.14 and distribution jobs pass.
-
