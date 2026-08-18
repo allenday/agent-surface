@@ -65,6 +65,9 @@ class ReferenceRegistry:
         self._by_kind[codec.kind] = codec
         self._by_type[codec.python_type] = codec
 
+    def supports_type(self, python_type: type[object]) -> bool:
+        return python_type in self._by_type
+
     def encode(self, value: object) -> ReferenceValue:
         codec = self._by_type.get(type(value))
         if codec is None:
