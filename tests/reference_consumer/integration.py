@@ -1,6 +1,6 @@
 """The sole boundary between the consumer domain and agent-surface."""
 
-from agent_surface import App, OperationError
+from agent_surface import App, OperationError, ReferenceRegistry
 from tests.reference_consumer.domain import (
     Catalog,
     ConfirmationRequired,
@@ -11,7 +11,28 @@ from tests.reference_consumer.domain import (
     ResourceNotFound,
     ResourcePage,
     ResourceRecord,
+    ResourceRef,
 )
+
+
+class ResourceRefCodec:
+    kind = "resource"
+    python_type = ResourceRef
+
+    def encode(self, value: ResourceRef) -> str:
+        return value.value
+
+    def decode(self, token: str) -> ResourceRef:
+        return ResourceRef(value=token)
+
+    def display(self, value: ResourceRef) -> str:
+        return value.value
+
+
+def build_references() -> ReferenceRegistry:
+    references = ReferenceRegistry()
+    references.register(ResourceRefCodec())
+    return references
 
 
 def build_app(service: Catalog | None = None) -> tuple[App, Catalog]:

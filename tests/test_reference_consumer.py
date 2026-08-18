@@ -94,6 +94,15 @@ def test_integration_registers_consumer_models_and_safety_metadata() -> None:
     assert definitions["resource.mutate"].destructive is True
 
 
+def test_integration_registers_stable_resource_reference_codec() -> None:
+    domain = load_domain()
+    integration = load_integration()
+
+    decoded = integration.build_references().decode_type(domain.ResourceRef, "resource-a")
+
+    assert decoded == domain.ResourceRef(value="resource-a")
+
+
 @pytest.mark.asyncio
 async def test_integration_invokes_sync_async_and_destructive_operations() -> None:
     integration = load_integration()
