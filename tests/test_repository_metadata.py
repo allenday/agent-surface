@@ -135,6 +135,15 @@ def test_ci_covers_supported_python_and_builds_distributions() -> None:
     assert "uv build" in quality_commands
     assert "dist/*.whl" in quality_commands
 
+    test_uv = next(
+        step for step in workflow["jobs"]["test"]["steps"] if step["name"] == "Set up uv"
+    )
+    quality_uv = next(
+        step for step in workflow["jobs"]["quality"]["steps"] if step["name"] == "Set up uv"
+    )
+    assert test_uv["with"]["cache-suffix"] == "${{ matrix.python-version }}"
+    assert quality_uv["with"]["cache-suffix"] == "quality"
+
 
 def test_release_uses_separate_oidc_environments_and_one_build() -> None:
     workflow = load_yaml(".github/workflows/release.yml")

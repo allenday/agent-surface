@@ -33,6 +33,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+          cache-suffix: ${{ matrix.python-version }}
       - name: Install locked dependencies
         run: uv sync --frozen --all-extras --dev
       - name: Run tests
@@ -54,6 +55,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+          cache-suffix: quality
       - name: Install locked dependencies
         run: uv sync --frozen --all-extras --dev
       - name: Lint
