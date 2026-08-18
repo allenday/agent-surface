@@ -8,6 +8,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
+import click
+
+from agent_surface.app import App
 from agent_surface.operations import OperationDefinition, OperationRegistry
 from agent_surface.references import ReferenceRegistry
 
@@ -202,6 +205,100 @@ class CliPlanCompiler:
         )
 
 
+class ClickAdapter:
+    """Build a mountable Click command tree from immutable operation plans."""
+
+    def __init__(
+        self,
+        app: App,
+        *,
+        references: ReferenceRegistry | None = None,
+    ) -> None:
+        self._app = app
+        self._references = references or ReferenceRegistry()
+        self._plans = CliPlanCompiler(
+            app.operations,
+            references=self._references,
+        ).compile()
+
+    def command(self) -> click.Group:
+        root = click.Group(
+            name=self._app.name,
+            help=f"{self._app.name} agent surface",
+            context_settings={"help_option_names": ["-h", "--help"]},
+        )
+        for plan in self._plans:
+            parent = root
+            for segment in plan.path[:-1]:
+                existing = parent.commands.get(segment)
+                if existing is None:
+                    group = click.Group(name=segment)
+                    parent.add_command(group)
+                    parent = group
+                elif isinstance(existing, click.Group):
+                    parent = existing
+                else:  # pragma: no cover - compiler rejects this shape
+                    raise AssertionError("compiled command path became ambiguous")
+            parent.add_command(self._leaf_command(plan))
+        return root
+
+    @staticmethod
+    def _leaf_command(plan: CliCommandPlan) -> click.Command:
+        def callback(**params: Any) -> None:
+            del params
+
+        return click.Command(
+            name=plan.path[-1],
+            callback=callback,
+            params=[_click_parameter(field) for field in plan.fields],
+            help=plan.summary,
+        )
+
+
+def build_click_group(
+    app: App,
+    *,
+    references: ReferenceRegistry | None = None,
+) -> click.Group:
+    return ClickAdapter(app, references=references).command()
+
+
+def _click_parameter(field: CliFieldPlan) -> click.Parameter:
+    parameter_type = _click_type(field)
+    if field.kind == "argument":
+        return click.Argument(
+            field.parameter_decls,
+            required=field.required,
+            type=parameter_type,
+        )
+    declarations = field.parameter_decls
+    if field.value_kind == "boolean":
+        declarations = (f"{declarations[0]}/--no-{declarations[0][2:]}",)
+    return click.Option(
+        declarations,
+        required=field.required,
+        type=parameter_type,
+        multiple=field.multiple,
+        is_flag=field.value_kind == "boolean",
+        default=None if not field.multiple else (),
+        help=field.help,
+        show_default=False,
+    )
+
+
+def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:
+    if field.choices:
+        return click.Choice(field.choices, case_sensitive=True)
+    return {
+        "boolean": click.BOOL,
+        "float": click.FLOAT,
+        "integer": click.INT,
+        "path": click.Path(path_type=str),
+        "reference": click.STRING,
+        "string": click.STRING,
+    }[field.value_kind]
+
+
 def _unwrap_optional(annotation: Any) -> tuple[Any, bool]:
     origin = get_origin(annotation)
     if origin in (types.UnionType, typing.Union):
@@ -230,4 +327,6 @@ __all__ = [
     "CliDefinitionError",
     "CliFieldPlan",
     "CliPlanCompiler",
+    "ClickAdapter",
+    "build_click_group",
 ]
