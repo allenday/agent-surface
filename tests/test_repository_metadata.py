@@ -135,6 +135,35 @@ def test_bounded_rendering_contract_is_public_and_agent_enforced() -> None:
         assert required in agent_guide
 
 
+def test_bounded_action_discovery_contract_is_public_and_agent_enforced() -> None:
+    readme = (ROOT / "README.md").read_text()
+    adoption = (ROOT / "docs" / "adoption.md").read_text()
+    agent_guide = (ROOT / "AGENTS.md").read_text()
+
+    for required in (
+        "ReferenceCodec",
+        "ReferenceRegistry",
+        "ActionCatalog",
+        "AllowActions",
+        "@action",
+        "immediate continuation",
+    ):
+        assert required in readme
+    for required in (
+        "exact-name",
+        "explicit policy",
+        "str(object)",
+        "descriptor",
+    ):
+        assert required in adoption
+    for required in (
+        "properties or descriptors",
+        "deny-by-default",
+        "exhaustive action",
+    ):
+        assert required in agent_guide
+
+
 def test_github_contributor_templates_are_structured_and_parseable() -> None:
     bug = load_yaml(".github/ISSUE_TEMPLATE/bug.yml")
     feature = load_yaml(".github/ISSUE_TEMPLATE/feature.yml")

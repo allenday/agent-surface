@@ -49,3 +49,19 @@ round-trips.
 
 The conformance fixture under `tests/reference_consumer/` demonstrates this boundary with entirely
 synthetic data. It is the acceptance surface for future adapters.
+
+## References and action discovery
+
+Keep reference identity explicit at the integration boundary. A custom object used as an action-slot
+value needs a registered codec with separate encode, decode, and display behavior. Never use
+`str(object)` as identity; a label may change without changing the encoded reference.
+
+Candidate introspection is narrow: registered Pydantic fields and methods marked with `@action` may
+be compiled, but properties and each arbitrary descriptor remain untouched. Runtime binding uses
+explicit inputs or an exact-name compatible value from safe instance data. It never searches the
+object graph or binds by type alone.
+
+Compilation is not publication. Require an explicit policy, preferably an allow-list, before an
+action reaches `next_actions`. Put policy-filtered actions in `ActionCatalog`; page them with an item
+budget and follow only the immediate continuation cursor. Repeated choices belong in a parameterized
+slot with a paginated source command, not an exhaustive expansion.

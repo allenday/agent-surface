@@ -33,6 +33,8 @@ uv build
 - `src/agent_surface/contracts.py`: stable transport-neutral envelopes and actions
 - `src/agent_surface/budgets.py`: item/byte limits and explicit bounded collections
 - `src/agent_surface/rendering.py`: deterministic adaptive YAML and JSON rendering
+- `src/agent_surface/references.py`: stable custom-object identity and display codecs
+- `src/agent_surface/actions.py`: candidate compilation, policy binding, and cursor discovery
 - `src/agent_surface/operations.py`: typed registration and invocation
 - `src/agent_surface/app.py`: public application/decorator API
 - `src/agent_surface/skills/`: bundled `SKILL.md`, `reference.md`, and future sidecars
@@ -53,6 +55,10 @@ uv build
   discovery action instead of expanding high-branch-factor graphs.
 - Introspection is opt-in: decorated methods and Pydantic fields may produce candidates, but
   explicit policy decides which actions are published.
+- Never evaluate properties or descriptors during candidate discovery. Publication is deny-by-default;
+  compilation alone never authorizes an action.
+- Never serialize an exhaustive action graph. Page concrete actions or expose one parameterized slot
+  source with an immediate continuation.
 - Never use `str(object)` as a stable reference. Use an explicit reference codec.
 - Keep Click and MCP adapters thin; business logic belongs in the shared operation layer.
 - Project CLI and MCP as siblings from the registry; never implement one transport through another.

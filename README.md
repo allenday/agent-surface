@@ -9,8 +9,8 @@ Define a typed Python operation once, then project it as a YAML-first CLI, MCP t
 machine-readable schemas.
 
 > [!NOTE]
-> The typed operation core and transport-neutral YAML/JSON renderer work today. CLI, discovery,
-> MCP, and OpenAPI adapters are under active development; the public API may change before 1.0.
+> The typed operation, rendering, reference, and bounded action-discovery cores work today. Generated
+> CLI, MCP, and OpenAPI adapters are under active development; the public API may change before 1.0.
 
 ## Install
 
@@ -88,6 +88,23 @@ print(render(page, options=RenderOptions(format="json")))
 raw collection. Truncation is valid only through `BoundedCollection`, which requires a concrete
 continuation action. `render_envelope` converts an oversized success envelope into a complete
 structured error envelope when that error fits the configured byte budget.
+
+## Publish discoverable actions
+
+Custom objects need a `ReferenceCodec`; encoded identity and display text are separate. Register the
+codec with `ReferenceRegistry`, then compile candidates and publish them only through an explicit
+policy such as `AllowActions`. Methods are introspected only when marked with `@action`.
+
+```python
+from agent_surface import ActionCatalog, OutputBudget
+
+# `published` is the policy-filtered tuple returned by ActionPublisher.
+catalog = ActionCatalog(published)
+frontier = catalog.page(budget=OutputBudget(max_items=20))
+```
+
+When more actions exist, `frontier.discover` contains the immediate continuation command. Later pages
+remain reachable through its opaque cursor; they are never expanded into the current response.
 
 ## Design principles
 
