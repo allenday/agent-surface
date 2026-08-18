@@ -12,9 +12,11 @@ from typing import Any, Literal, get_args, get_origin
 import click
 from click.core import ParameterSource
 
+from agent_surface.actions import InvalidActionCursor
 from agent_surface.app import App
-from agent_surface.budgets import OutputBudgetExceeded
+from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
 from agent_surface.contracts import CommandView, ErrorEnvelope, ParsedCommand, SuccessEnvelope
+from agent_surface.discovery import OperationCatalog
 from agent_surface.operations import (
     OperationDefinition,
     OperationError,
@@ -258,7 +260,238 @@ class ClickAdapter:
                 else:  # pragma: no cover - compiler rejects this shape
                     raise AssertionError("compiled command path became ambiguous")
             parent.add_command(self._leaf_command(plan))
+        self._add_discovery(root)
         return root
+
+    def _add_discovery(self, root: click.Group) -> None:
+        operations = click.Group("operations", help="Discover registered operations.")
+        actions = click.Group("actions", help="Discover policy-approved actions.")
+        catalog = OperationCatalog(
+            self._app.operations,
+            discovery_command=(self._app.name, "operations", "list"),
+        )
+
+        @click.pass_context
+        def list_operations(
+            context: click.Context,
+            /,
+            cursor: str | None,
+            limit: int,
+            _surface_format: str,
+            _surface_yaml_style: str,
+        ) -> None:
+            command = self._discovery_view(
+                context,
+                ("operations", "list"),
+                options={"cursor": cursor, "limit": limit},
+            )
+            try:
+                page = catalog.page(
+                    cursor=cursor,
+                    budget=OutputBudget(
+                        max_items=limit,
+                        max_bytes=self._render_options.budget.max_bytes,
+                    ),
+                )
+                self._emit_success(
+                    command,
+                    page,
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+            except OperationError as error:
+                self._emit_error(
+                    command,
+                    error,
+                    exit_code=2,
+                    operation="operations.list",
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+
+        @click.pass_context
+        def describe_operation(
+            context: click.Context,
+            /,
+            name: str,
+            _surface_format: str,
+            _surface_yaml_style: str,
+        ) -> None:
+            command = self._discovery_view(
+                context,
+                ("operations", "describe"),
+                arguments={"name": name},
+            )
+            try:
+                self._emit_success(
+                    command,
+                    catalog.describe(name),
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+            except OperationError as error:
+                self._emit_error(
+                    command,
+                    error,
+                    exit_code=2,
+                    operation="operations.describe",
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+
+        @click.pass_context
+        def list_actions(
+            context: click.Context,
+            /,
+            cursor: str | None,
+            limit: int,
+            _surface_format: str,
+            _surface_yaml_style: str,
+        ) -> None:
+            command = self._discovery_view(
+                context,
+                ("actions", "list"),
+                options={"cursor": cursor, "limit": limit},
+            )
+            try:
+                page = self._action_provider.list_actions(
+                    cursor=cursor,
+                    budget=OutputBudget(
+                        max_items=limit,
+                        max_bytes=self._render_options.budget.max_bytes,
+                    ),
+                )
+                self._emit_success(
+                    command,
+                    page,
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+            except InvalidActionCursor as error:
+                operation_error = OperationError(
+                    error.code,
+                    str(error),
+                    fix=error.fix,
+                )
+                self._emit_error(
+                    command,
+                    operation_error,
+                    exit_code=2,
+                    operation="actions.list",
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+
+        @click.pass_context
+        def explain_action(
+            context: click.Context,
+            /,
+            operation: str,
+            _surface_format: str,
+            _surface_yaml_style: str,
+        ) -> None:
+            command = self._discovery_view(
+                context,
+                ("actions", "explain"),
+                arguments={"operation": operation},
+            )
+            action = self._action_provider.explain(operation)
+            if action is None:
+                self._emit_error(
+                    command,
+                    OperationError(
+                        "action_not_found",
+                        f"No published action is available for {operation}",
+                        fix="Run actions list to discover policy-approved actions.",
+                    ),
+                    exit_code=2,
+                    operation="actions.explain",
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
+            self._emit_success(
+                command,
+                action,
+                document_format=_surface_format,
+                yaml_style=_surface_yaml_style,
+            )
+
+        operations.add_command(
+            click.Command(
+                "list",
+                callback=list_operations,
+                params=[*_pagination_parameters(), *_render_parameters()],
+                help="List a bounded page of registered operations.",
+            )
+        )
+        operations.add_command(
+            click.Command(
+                "describe",
+                callback=describe_operation,
+                params=[click.Argument(("name",), required=True), *_render_parameters()],
+                help="Describe one operation and its Pydantic schemas.",
+            )
+        )
+        actions.add_command(
+            click.Command(
+                "list",
+                callback=list_actions,
+                params=[*_pagination_parameters(), *_render_parameters()],
+                help="List a bounded page of policy-approved actions.",
+            )
+        )
+        actions.add_command(
+            click.Command(
+                "explain",
+                callback=explain_action,
+                params=[click.Argument(("operation",), required=True), *_render_parameters()],
+                help="Explain one policy-approved action.",
+            )
+        )
+        root.add_command(operations)
+        root.add_command(actions)
+
+    def _emit_success(
+        self,
+        command: CommandView,
+        result: object,
+        *,
+        document_format: str,
+        yaml_style: str,
+    ) -> None:
+        envelope = SuccessEnvelope(command=command, result=result)
+        try:
+            rendered = render(
+                envelope,
+                options=self._selected_render_options(document_format, yaml_style),
+            )
+        except OutputBudgetExceeded as error:
+            self._emit_error(
+                _compact_command(command),
+                OperationError(error.code, str(error), details=(error.details,), fix=error.fix),
+                exit_code=70,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+        click.echo(rendered, nl=False)
+
+    def _discovery_view(
+        self,
+        context: click.Context,
+        path: tuple[str, ...],
+        *,
+        arguments: dict[str, Any] | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> CommandView:
+        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
+        return CommandView(
+            raw=raw,
+            parsed=ParsedCommand(
+                path=path,
+                args=arguments or {},
+                options={key: value for key, value in (options or {}).items() if value is not None},
+            ),
+        )
 
     def _leaf_command(self, plan: CliCommandPlan) -> click.Command:
         @click.pass_context
@@ -567,6 +800,18 @@ def _render_parameters() -> list[click.Parameter]:
             type=click.Choice(("auto", "flow", "block")),
             default="auto",
             help="YAML collection presentation style.",
+        ),
+    ]
+
+
+def _pagination_parameters() -> list[click.Parameter]:
+    return [
+        click.Option(("--cursor",), type=click.STRING, default=None),
+        click.Option(
+            ("--limit",),
+            type=click.IntRange(min=1, max=100),
+            default=20,
+            show_default=True,
         ),
     ]
 

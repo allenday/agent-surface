@@ -2,7 +2,9 @@
 
 from typing import Any, Protocol
 
+from agent_surface.budgets import OutputBudget
 from agent_surface.contracts import (
+    Action,
     ActionCollection,
     ErrorDetail,
     ErrorInfo,
@@ -23,6 +25,15 @@ class ActionProvider(Protocol):
         error: OperationError | None = None,
     ) -> ActionCollection: ...
 
+    def list_actions(
+        self,
+        *,
+        cursor: str | None = None,
+        budget: OutputBudget | None = None,
+    ) -> ActionCollection: ...
+
+    def explain(self, operation: str) -> Action | None: ...
+
 
 class NoActions:
     """Explicit deny-by-default contextual action provider."""
@@ -35,6 +46,17 @@ class NoActions:
         error: OperationError | None = None,
     ) -> ActionCollection:
         return ActionCollection()
+
+    def list_actions(
+        self,
+        *,
+        cursor: str | None = None,
+        budget: OutputBudget | None = None,
+    ) -> ActionCollection:
+        return ActionCollection()
+
+    def explain(self, operation: str) -> Action | None:
+        return None
 
 
 def success_outcome[ResultT](
