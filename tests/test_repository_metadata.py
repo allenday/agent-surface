@@ -1,3 +1,4 @@
+import re
 import tomllib
 from pathlib import Path
 
@@ -8,6 +9,15 @@ ROOT = Path(__file__).parents[1]
 
 def load_yaml(path: str) -> object:
     return YAML(typ="safe").load(ROOT / path)
+
+
+def workflow_uses(workflow: dict[str, object]) -> list[str]:
+    return [
+        step["uses"]
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", ())
+        if "uses" in step
+    ]
 
 
 def test_python_tooling_uses_the_declared_minimum_version() -> None:
@@ -106,3 +116,49 @@ def test_dependabot_tracks_uv_and_actions_weekly() -> None:
 
     assert {update["package-ecosystem"] for update in updates} == {"uv", "github-actions"}
     assert all(update["schedule"]["interval"] == "weekly" for update in updates)
+
+
+def test_ci_covers_supported_python_and_builds_distributions() -> None:
+    workflow = load_yaml(".github/workflows/ci.yml")
+
+    assert workflow["permissions"] == {"contents": "read"}
+    assert set(workflow["on"]) == {"push", "pull_request"}
+    assert workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"] == [
+        "3.12",
+        "3.13",
+        "3.14",
+    ]
+    quality_steps = workflow["jobs"]["quality"]["steps"]
+    quality_commands = "\n".join(step.get("run", "") for step in quality_steps)
+    assert "ruff check" in quality_commands
+    assert "mypy src" in quality_commands
+    assert "uv build" in quality_commands
+    assert "dist/*.whl" in quality_commands
+
+
+def test_release_uses_separate_oidc_environments_and_one_build() -> None:
+    workflow = load_yaml(".github/workflows/release.yml")
+
+    assert set(workflow["on"]) == {"workflow_dispatch", "release"}
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["publish-testpypi"]["environment"]["name"] == "testpypi"
+    assert workflow["jobs"]["publish-pypi"]["environment"]["name"] == "pypi"
+    assert workflow["jobs"]["publish-testpypi"]["permissions"] == {"id-token": "write"}
+    assert workflow["jobs"]["publish-pypi"]["permissions"] == {"id-token": "write"}
+    assert workflow["jobs"]["publish-testpypi"]["needs"] == "build"
+    assert workflow["jobs"]["publish-pypi"]["needs"] == "build"
+
+    source = (ROOT / ".github/workflows/release.yml").read_text()
+    assert "repository-url: https://test.pypi.org/legacy/" in source
+    assert "password:" not in source
+
+
+def test_actions_are_pinned_to_immutable_commits() -> None:
+    workflows = [
+        load_yaml(".github/workflows/ci.yml"),
+        load_yaml(".github/workflows/release.yml"),
+    ]
+
+    uses = [reference for workflow in workflows for reference in workflow_uses(workflow)]
+    assert uses
+    assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", reference) for reference in uses)
