@@ -1,5 +1,6 @@
 """Compile registered operations into an immutable Click projection plan."""
 
+import asyncio
 import inspect
 import types
 import typing
@@ -9,15 +10,28 @@ from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
 import click
+from click.core import ParameterSource
 
 from agent_surface.app import App
-from agent_surface.operations import OperationDefinition, OperationRegistry
+from agent_surface.budgets import OutputBudgetExceeded
+from agent_surface.contracts import CommandView, ErrorEnvelope, ParsedCommand, SuccessEnvelope
+from agent_surface.operations import (
+    OperationDefinition,
+    OperationError,
+    OperationInputError,
+    OperationOutputError,
+    OperationRegistry,
+)
+from agent_surface.outcomes import ActionProvider, NoActions, error_outcome
 from agent_surface.references import ReferenceRegistry
+from agent_surface.rendering import RenderOptions, render, render_envelope
 
 CliParameterKind = Literal["argument", "option"]
 CliValueKind = Literal["boolean", "float", "integer", "path", "reference", "string"]
 
 _RESERVED_ROOTS = frozenset({"actions", "operations"})
+_RAW_ARGV_KEY = "agent_surface.raw_argv"
+_REDACTED = "<redacted>"
 
 
 class CliDefinitionError(Exception):
@@ -213,22 +227,26 @@ class ClickAdapter:
         app: App,
         *,
         references: ReferenceRegistry | None = None,
+        action_provider: ActionProvider | None = None,
+        render_options: RenderOptions | None = None,
     ) -> None:
         self._app = app
         self._references = references or ReferenceRegistry()
+        self._action_provider = action_provider or NoActions()
+        self._render_options = render_options or RenderOptions()
         self._plans = CliPlanCompiler(
             app.operations,
             references=self._references,
         ).compile()
 
     def command(self) -> click.Group:
-        root = click.Group(
+        root = _SurfaceGroup(
             name=self._app.name,
             help=f"{self._app.name} agent surface",
             context_settings={"help_option_names": ["-h", "--help"]},
         )
         for plan in self._plans:
-            parent = root
+            parent: click.Group = root
             for segment in plan.path[:-1]:
                 existing = parent.commands.get(segment)
                 if existing is None:
@@ -242,16 +260,249 @@ class ClickAdapter:
             parent.add_command(self._leaf_command(plan))
         return root
 
-    @staticmethod
-    def _leaf_command(plan: CliCommandPlan) -> click.Command:
-        def callback(**params: Any) -> None:
-            del params
+    def _leaf_command(self, plan: CliCommandPlan) -> click.Command:
+        @click.pass_context
+        def callback(context: click.Context, /, **params: Any) -> None:
+            self._invoke(context, plan, params)
 
-        return click.Command(
+        parameters = [_click_parameter(field) for field in plan.fields]
+        if plan.destructive and not any(field.name == "confirm" for field in plan.fields):
+            parameters.append(
+                click.Option(
+                    ("--confirm", "_surface_confirm"),
+                    is_flag=True,
+                    default=False,
+                    help="Confirm this destructive operation.",
+                )
+            )
+        parameters.extend(_render_parameters())
+
+        return _SurfaceCommand(
             name=plan.path[-1],
             callback=callback,
-            params=[_click_parameter(field) for field in plan.fields],
+            params=parameters,
             help=plan.summary,
+            adapter=self,
+            plan=plan,
+        )
+
+    def _invoke(
+        self,
+        context: click.Context,
+        plan: CliCommandPlan,
+        params: dict[str, Any],
+    ) -> None:
+        document_format = params.pop("_surface_format")
+        yaml_style = params.pop("_surface_yaml_style")
+        transport_confirm = params.pop("_surface_confirm", False)
+        command = self._command_view(context, plan, params)
+        payload = self._payload(context, plan, params)
+        confirmed = transport_confirm or payload.get("confirm") is True
+        if plan.destructive and not confirmed:
+            self._emit_error(
+                command,
+                OperationError(
+                    "confirmation_required",
+                    "Destructive operation requires explicit confirmation",
+                    fix="Retry with --confirm after reviewing the target.",
+                ),
+                exit_code=3,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+
+        try:
+            result = asyncio.run(self._app.operations.invoke(plan.operation, payload))
+            actions = self._action_provider.actions_for(
+                operation=plan.operation,
+                result=result,
+            )
+            envelope = SuccessEnvelope(
+                command=command,
+                result=result,
+                next_actions=actions,
+            )
+            click.echo(
+                render(
+                    envelope,
+                    options=self._selected_render_options(document_format, yaml_style),
+                ),
+                nl=False,
+            )
+        except OperationInputError as error:
+            self._emit_error(
+                command,
+                self._redact_error(error, plan),
+                exit_code=2,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+        except OperationOutputError as error:
+            self._emit_error(
+                command,
+                error,
+                exit_code=70,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+        except OperationError as error:
+            self._emit_error(
+                command,
+                error,
+                exit_code=4,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+        except OutputBudgetExceeded as error:
+            self._emit_error(
+                _compact_command(command),
+                OperationError(error.code, str(error), details=(error.details,), fix=error.fix),
+                exit_code=70,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+        except Exception:
+            self._emit_error(
+                command,
+                OperationError(
+                    "internal_error",
+                    "Operation failed unexpectedly",
+                    fix="Retry or inspect application diagnostics.",
+                ),
+                exit_code=70,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+
+    def _payload(
+        self,
+        context: click.Context,
+        plan: CliCommandPlan,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for field in plan.fields:
+            if context.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
+                continue
+            value = params[field.name]
+            if field.reference_type is not None:
+                value = self._references.decode_type(field.reference_type, value)
+            payload[field.name] = value
+        return payload
+
+    def _command_view(
+        self,
+        context: click.Context,
+        plan: CliCommandPlan,
+        params: dict[str, Any],
+    ) -> CommandView:
+        arguments: dict[str, Any] = {}
+        options: dict[str, Any] = {}
+        flags = []
+        for field in plan.fields:
+            if context.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
+                continue
+            value = _REDACTED if field.sensitive else params[field.name]
+            if field.kind == "argument":
+                arguments[field.name] = value
+            elif field.value_kind == "boolean":
+                flags.append(field.name if value is True else f"no-{field.name.replace('_', '-')}")
+            else:
+                options[field.name] = value
+        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *plan.path)))
+        return CommandView(
+            raw=_redact_raw(raw, plan),
+            parsed=ParsedCommand(
+                path=plan.path,
+                args=arguments,
+                options=options,
+                flags=tuple(flags),
+            ),
+        )
+
+    def _emit_error(
+        self,
+        command: CommandView,
+        error: OperationError,
+        *,
+        exit_code: int,
+        operation: str = "",
+        document_format: str,
+        yaml_style: str,
+    ) -> typing.Never:
+        actions = self._action_provider.actions_for(
+            operation=operation,
+            error=error,
+        )
+        outcome = error_outcome(error, next_actions=actions)
+        envelope = ErrorEnvelope(
+            command=command,
+            error=outcome.error,
+            fix=outcome.fix,
+            next_actions=outcome.next_actions,
+        )
+        click.echo(
+            render_envelope(
+                envelope,
+                options=self._selected_render_options(document_format, yaml_style),
+            ),
+            nl=False,
+        )
+        raise click.exceptions.Exit(exit_code)
+
+    def _emit_parse_error(
+        self,
+        context: click.Context,
+        plan: CliCommandPlan,
+        error: click.ClickException,
+    ) -> typing.Never:
+        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *plan.path)))
+        document_format, yaml_style = _render_choices_from_raw(raw)
+        command = CommandView(
+            raw=_redact_raw(raw, plan),
+            parsed=ParsedCommand(path=plan.path),
+        )
+        code = {
+            click.MissingParameter: "missing_parameter",
+            click.BadParameter: "invalid_value",
+            click.NoSuchOption: "unknown_option",
+        }.get(type(error), "invalid_command")
+        self._emit_error(
+            command,
+            OperationError(
+                code,
+                error.format_message(),
+                fix=f"Run {self._app.name} operations describe {plan.operation}.",
+            ),
+            exit_code=2,
+            operation=plan.operation,
+            document_format=document_format,
+            yaml_style=yaml_style,
+        )
+
+    def _selected_render_options(self, document_format: str, yaml_style: str) -> RenderOptions:
+        return self._render_options.model_copy(
+            update={"format": document_format, "yaml_style": yaml_style}
+        )
+
+    @staticmethod
+    def _redact_error(error: OperationError, plan: CliCommandPlan) -> OperationError:
+        sensitive = {field.name for field in plan.fields if field.sensitive}
+        details = []
+        for item in error.details:
+            copied = dict(item)
+            location = tuple(copied.get("loc", ()))
+            if location and location[0] in sensitive and "input" in copied:
+                copied["input"] = _REDACTED
+            details.append(copied)
+        return OperationError(
+            error.code,
+            error.message,
+            details=tuple(details),
+            fix=error.fix,
+            retryable=error.retryable,
         )
 
 
@@ -259,8 +510,127 @@ def build_click_group(
     app: App,
     *,
     references: ReferenceRegistry | None = None,
+    action_provider: ActionProvider | None = None,
+    render_options: RenderOptions | None = None,
 ) -> click.Group:
-    return ClickAdapter(app, references=references).command()
+    return ClickAdapter(
+        app,
+        references=references,
+        action_provider=action_provider,
+        render_options=render_options,
+    ).command()
+
+
+class _SurfaceGroup(click.Group):
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        raw = (info_name or self.name or "agent-surface", *tuple(args))
+        context = super().make_context(info_name, args, parent=parent, **extra)
+        context.meta.setdefault(_RAW_ARGV_KEY, raw)
+        return context
+
+
+class _SurfaceCommand(click.Command):
+    def __init__(
+        self,
+        *args: Any,
+        adapter: ClickAdapter,
+        plan: CliCommandPlan,
+        **kwargs: Any,
+    ) -> None:
+        self._adapter = adapter
+        self._plan = plan
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        try:
+            return super().parse_args(ctx, args)
+        except click.ClickException as error:
+            self._adapter._emit_parse_error(ctx, self._plan, error)
+
+
+def _render_parameters() -> list[click.Parameter]:
+    return [
+        click.Option(
+            ("--format", "_surface_format"),
+            type=click.Choice(("yaml", "json")),
+            default="yaml",
+            help="Structured document format.",
+        ),
+        click.Option(
+            ("--yaml-style", "_surface_yaml_style"),
+            type=click.Choice(("auto", "flow", "block")),
+            default="auto",
+            help="YAML collection presentation style.",
+        ),
+    ]
+
+
+def _redact_raw(raw: tuple[str, ...], plan: CliCommandPlan) -> tuple[str, ...]:
+    sensitive_options = {
+        field.parameter_decls[0]
+        for field in plan.fields
+        if field.sensitive and field.kind == "option"
+    }
+    redacted = list(raw)
+    redact_next = False
+    for index, token in enumerate(redacted):
+        if redact_next:
+            redacted[index] = _REDACTED
+            redact_next = False
+            continue
+        if token in sensitive_options:
+            redact_next = True
+            continue
+        for option in sensitive_options:
+            if token.startswith(f"{option}="):
+                redacted[index] = f"{option}={_REDACTED}"
+                break
+    return tuple(redacted)
+
+
+def _render_choices_from_raw(raw: tuple[str, ...]) -> tuple[str, str]:
+    document_format = "yaml"
+    yaml_style = "auto"
+    for index, token in enumerate(raw):
+        if token == "--format" and index + 1 < len(raw):
+            document_format = raw[index + 1]
+        elif token.startswith("--format="):
+            document_format = token.partition("=")[2]
+        elif token == "--yaml-style" and index + 1 < len(raw):
+            yaml_style = raw[index + 1]
+        elif token.startswith("--yaml-style="):
+            yaml_style = token.partition("=")[2]
+    return document_format, yaml_style
+
+
+def _compact_command(command: CommandView) -> CommandView:
+    marker = "<value omitted: exceeds output budget>"
+
+    def compact(value: Any) -> Any:
+        if isinstance(value, str) and len(value.encode("utf-8")) > 256:
+            return marker
+        if isinstance(value, tuple):
+            return tuple(compact(item) for item in value)
+        if isinstance(value, dict):
+            return {key: compact(item) for key, item in value.items()}
+        return value
+
+    return CommandView(
+        raw=compact(command.raw),
+        parsed=ParsedCommand(
+            path=command.parsed.path,
+            args=compact(command.parsed.args),
+            options=compact(command.parsed.options),
+            flags=command.parsed.flags,
+        ),
+        resolved=command.resolved,
+    )
 
 
 def _click_parameter(field: CliFieldPlan) -> click.Parameter:
@@ -274,15 +644,18 @@ def _click_parameter(field: CliFieldPlan) -> click.Parameter:
     declarations = field.parameter_decls
     if field.value_kind == "boolean":
         declarations = (f"{declarations[0]}/--no-{declarations[0][2:]}",)
+    option_kwargs: dict[str, Any] = {}
+    if not field.required:
+        option_kwargs["default"] = () if field.multiple else None
     return click.Option(
         declarations,
         required=field.required,
         type=parameter_type,
         multiple=field.multiple,
         is_flag=field.value_kind == "boolean",
-        default=None if not field.multiple else (),
         help=field.help,
         show_default=False,
+        **option_kwargs,
     )
 
 
