@@ -14,7 +14,7 @@ from agent_surface.contracts import (
     SuccessEnvelope,
 )
 from agent_surface.operations import OperationError
-from agent_surface.rendering import RenderOptions, render
+from agent_surface.rendering import RenderOptions, render, render_envelope
 from agent_surface.skills import bundled_skill_path
 
 __all__ = [
@@ -34,4 +34,5 @@ __all__ = [
     "__version__",
     "bundled_skill_path",
     "render",
+    "render_envelope",
 ]

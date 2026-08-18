@@ -114,6 +114,27 @@ def test_adoption_boundary_is_documented_and_linked() -> None:
         assert required in guide
 
 
+def test_bounded_rendering_contract_is_public_and_agent_enforced() -> None:
+    readme = (ROOT / "README.md").read_text()
+    agent_guide = (ROOT / "AGENTS.md").read_text()
+
+    for required in (
+        "RenderOptions",
+        "BoundedCollection",
+        "render_envelope",
+        'yaml_style="flow"',
+        'format="json"',
+        "65,536",
+    ):
+        assert required in readme
+    for required in (
+        "rendering.py",
+        "never fabricate pagination",
+        "never silently truncate",
+    ):
+        assert required in agent_guide
+
+
 def test_github_contributor_templates_are_structured_and_parseable() -> None:
     bug = load_yaml(".github/ISSUE_TEMPLATE/bug.yml")
     feature = load_yaml(".github/ISSUE_TEMPLATE/feature.yml")

@@ -11,7 +11,13 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
-from agent_surface.contracts import ContractModel
+from agent_surface.contracts import (
+    ContractModel,
+    ErrorDetail,
+    ErrorEnvelope,
+    ErrorInfo,
+    SuccessEnvelope,
+)
 
 DocumentFormat = Literal["yaml", "json"]
 YamlStyle = Literal["auto", "flow", "block"]
@@ -41,6 +47,38 @@ def render(value: Any, *, options: RenderOptions | None = None) -> str:
         document = _render_yaml(normalized, selected.yaml_style)
     _validate_byte_budget(document, selected.budget)
     return document
+
+
+def render_envelope(
+    envelope: SuccessEnvelope[Any] | ErrorEnvelope,
+    *,
+    options: RenderOptions | None = None,
+) -> str:
+    """Render an envelope, substituting a complete structured budget error when possible."""
+
+    selected = options or RenderOptions()
+    try:
+        return render(envelope, options=selected)
+    except OutputBudgetExceeded as original:
+        error_envelope = ErrorEnvelope(
+            command=envelope.command,
+            error=ErrorInfo(
+                code=original.code,
+                message=str(original),
+                details=(
+                    ErrorDetail(
+                        path=original.path,
+                        code=original.code,
+                        value=original.details,
+                    ),
+                ),
+            ),
+            fix=original.fix,
+        )
+        try:
+            return render(error_envelope, options=selected)
+        except OutputBudgetExceeded as fallback:
+            raise original from fallback
 
 
 def _validate_item_budget(
@@ -144,4 +182,4 @@ def _is_multiline(value: Any) -> bool:
     return isinstance(value, str) and "\n" in value
 
 
-__all__ = ["RenderOptions", "render"]
+__all__ = ["RenderOptions", "render", "render_envelope"]

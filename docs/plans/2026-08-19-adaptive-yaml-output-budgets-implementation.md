@@ -95,10 +95,9 @@ error contract.
    silently truncate.
 5. Extend repository metadata tests to require the rendering API and principles in public docs.
 6. Run focused tests and `make check`.
-7. Verify `rg -n '\.\.\.' src/agent_surface tests/golden` finds no structured ellipsis placeholder
-   and that new public files contain no external consumer name, organization, URL, or identifier.
+7. Verify the golden files contain no `...` scalar, retain the semantic no-placeholder test, and
+   confirm new public files contain no external consumer name, organization, URL, or identifier.
 8. Commit as `docs: publish bounded rendering contract`.
 9. Request independent code review, address findings one at a time, and rerun `make check`.
 10. Fast-forward `main`, rerun `make check`, push, watch GitHub Actions, and close issue #3 only after
     all Python 3.12–3.14 and distribution jobs pass.
-

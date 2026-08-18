@@ -9,8 +9,8 @@ Define a typed Python operation once, then project it as a YAML-first CLI, MCP t
 machine-readable schemas.
 
 > [!NOTE]
-> The typed operation core works today. CLI, YAML rendering, discovery, MCP, and OpenAPI
-> adapters are under active development; the public API may change before 1.0.
+> The typed operation core and transport-neutral YAML/JSON renderer work today. CLI, discovery,
+> MCP, and OpenAPI adapters are under active development; the public API may change before 1.0.
 
 ## Install
 
@@ -55,6 +55,39 @@ def greet(request: GreetRequest) -> Greeting:
 The operation registry validates inputs and outputs with Pydantic and accepts synchronous or
 asynchronous handlers. Planned adapters consume the same registry instead of redefining
 transport-specific contracts.
+
+## Render bounded output
+
+YAML with adaptive flow style is the default. Small leaf dictionaries and lists stay compact;
+multiline text and larger structures remain block-oriented.
+
+```python
+from agent_surface import (
+    Action,
+    BoundedCollection,
+    OutputBudget,
+    RenderOptions,
+    render,
+)
+
+page = BoundedCollection[str].from_sequence(
+    ("resource-1", "resource-2", "resource-3"),
+    budget=OutputBudget(max_items=2),
+    continuation=Action(
+        rel="next-page",
+        command=("inventory", "resource", "list", "--cursor", "resource-2"),
+    ),
+)
+
+print(render(page))
+print(render(page, options=RenderOptions(yaml_style="flow")))
+print(render(page, options=RenderOptions(format="json")))
+```
+
+`OutputBudget` defaults to 20 returned items and 65,536 UTF-8 bytes. It never silently slices a
+raw collection. Truncation is valid only through `BoundedCollection`, which requires a concrete
+continuation action. `render_envelope` converts an oversized success envelope into a complete
+structured error envelope when that error fits the configured byte budget.
 
 ## Design principles
 

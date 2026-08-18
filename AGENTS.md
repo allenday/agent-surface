@@ -31,6 +31,8 @@ uv build
 ## Repository map
 
 - `src/agent_surface/contracts.py`: stable transport-neutral envelopes and actions
+- `src/agent_surface/budgets.py`: item/byte limits and explicit bounded collections
+- `src/agent_surface/rendering.py`: deterministic adaptive YAML and JSON rendering
 - `src/agent_surface/operations.py`: typed registration and invocation
 - `src/agent_surface/app.py`: public application/decorator API
 - `src/agent_surface/skills/`: bundled `SKILL.md`, `reference.md`, and future sidecars
@@ -45,6 +47,8 @@ uv build
   boundaries.
 - Keep YAML as the default structured representation. Flow style is preferred for small leaf
   collections; never use ellipsis as an omission marker.
+- Renderers never fabricate pagination and never silently truncate. Domain or integration code
+  must supply a concrete continuation action before bounding a collection.
 - Treat `next_actions` as a bounded relevant frontier. Expose totals, truncation, and a concrete
   discovery action instead of expanding high-branch-factor graphs.
 - Introspection is opt-in: decorated methods and Pydantic fields may produce candidates, but

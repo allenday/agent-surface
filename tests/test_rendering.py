@@ -5,8 +5,16 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
 
-from agent_surface import Action, BoundedCollection, OutputBudget, OutputBudgetExceeded
-from agent_surface.rendering import RenderOptions, render
+from agent_surface import (
+    Action,
+    BoundedCollection,
+    CommandView,
+    OutputBudget,
+    OutputBudgetExceeded,
+    ParsedCommand,
+    SuccessEnvelope,
+)
+from agent_surface.rendering import RenderOptions, render, render_envelope
 
 GOLDEN = Path(__file__).parent / "golden"
 
@@ -43,6 +51,13 @@ def load_yaml(document: str):
 
 def expected_value() -> dict[str, object]:
     return payload().model_dump(mode="json")
+
+
+def command_view() -> CommandView:
+    return CommandView(
+        raw=("inventory", "resource", "list"),
+        parsed=ParsedCommand(path=("resource", "list")),
+    )
 
 
 def test_render_options_default_to_yaml_auto_and_validate_literals() -> None:
@@ -143,3 +158,41 @@ def test_render_enforces_exact_utf8_byte_boundary() -> None:
         "measured_bytes": measured,
         "max_bytes": measured - 1,
     }
+
+
+def test_render_envelope_substitutes_complete_structured_size_error() -> None:
+    envelope = SuccessEnvelope[dict[str, str]](
+        command=command_view(),
+        result={"payload": "x" * 5_000},
+    )
+    options = RenderOptions(budget=OutputBudget(max_bytes=800))
+
+    document = render_envelope(envelope, options=options)
+    parsed = load_yaml(document)
+
+    assert len(document.encode("utf-8")) <= 800
+    assert parsed["ok"] is False
+    assert parsed["command"]["raw"] == ["inventory", "resource", "list"]
+    assert parsed["error"]["code"] == "response_too_large"
+    assert parsed["error"]["details"][0]["code"] == "response_too_large"
+    assert parsed["error"]["details"][0]["value"]["measured_bytes"] > 800
+    assert parsed["error"]["details"][0]["value"]["max_bytes"] == 800
+    assert parsed["fix"] == "Retry with a lower item limit or a narrower detail level."
+    assert "result" not in parsed
+
+
+def test_render_envelope_reraises_original_error_when_fallback_cannot_fit() -> None:
+    envelope = SuccessEnvelope[dict[str, str]](
+        command=command_view(),
+        result={"payload": "x" * 5_000},
+    )
+
+    with pytest.raises(OutputBudgetExceeded) as raised:
+        render_envelope(
+            envelope,
+            options=RenderOptions(budget=OutputBudget(max_bytes=1)),
+        )
+
+    assert raised.value.code == "response_too_large"
+    assert raised.value.details["max_bytes"] == 1
+    assert raised.value.details["measured_bytes"] > 1
