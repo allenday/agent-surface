@@ -1,6 +1,6 @@
 """Stable transport-neutral response contracts."""
 
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -94,10 +94,7 @@ class ErrorInfo(ContractModel):
     retryable: bool = False
 
 
-ResultT = TypeVar("ResultT")
-
-
-class SuccessEnvelope(ContractModel, Generic[ResultT]):
+class SuccessEnvelope[ResultT](ContractModel):
     """Successful agent-facing invocation result."""
 
     schema_version: Literal["1"] = "1"
