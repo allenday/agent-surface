@@ -96,6 +96,23 @@ class ReferenceRegistry:
             )
         return value
 
+    def decode_type[T](self, python_type: type[T], token: str) -> T:
+        """Decode one stable token using the codec registered for an exact Python type."""
+
+        codec = self._by_type.get(python_type)
+        if codec is None:
+            raise MissingReferenceCodec(
+                f"No reference codec is registered for {python_type.__name__}",
+                fix="Register an explicit codec before decoding this reference token.",
+            )
+        value = codec.decode(token)
+        if type(value) is not python_type or codec.encode(value) != token:
+            raise InvalidReference(
+                f"Reference {codec.kind}:{token} failed codec round-trip validation",
+                fix="Use an ID produced by the registered codec.",
+            )
+        return value
+
 
 def encode_scalar(value: object) -> str:
     """Encode safe scalar slot values without incidental object stringification."""

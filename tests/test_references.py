@@ -54,6 +54,22 @@ def test_registry_round_trips_identity_separately_from_display() -> None:
     assert encoded.id != encoded.label
 
 
+def test_registry_decodes_a_token_by_exact_python_type() -> None:
+    registry = ReferenceRegistry()
+    registry.register(ResourceCodec())
+
+    decoded = registry.decode_type(Resource, "resource-017")
+
+    assert decoded == Resource(key="resource-017", title="Resource resource-017")
+
+
+def test_registry_rejects_unregistered_reference_type_token() -> None:
+    registry = ReferenceRegistry()
+
+    with pytest.raises(MissingReferenceCodec):
+        registry.decode_type(Resource, "resource-017")
+
+
 def test_registry_rejects_duplicate_kind_and_python_type() -> None:
     registry = ReferenceRegistry()
     registry.register(ResourceCodec())

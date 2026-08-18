@@ -23,10 +23,13 @@ from agent_surface.contracts import (
     CommandView,
     ErrorEnvelope,
     ErrorInfo,
+    ErrorOutcome,
     ParsedCommand,
     SuccessEnvelope,
+    SuccessOutcome,
 )
 from agent_surface.operations import OperationError
+from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
 from agent_surface.references import (
     DuplicateReferenceCodec,
     InvalidReference,
@@ -48,6 +51,7 @@ __all__ = [
     "ActionDefinitionError",
     "ActionPolicy",
     "ActionPublisher",
+    "ActionProvider",
     "ActionSlotPlan",
     "AllowActions",
     "App",
@@ -57,10 +61,12 @@ __all__ = [
     "DenyAllActions",
     "ErrorEnvelope",
     "ErrorInfo",
+    "ErrorOutcome",
     "InvalidReference",
     "InvalidActionCursor",
     "MissingReferenceCodec",
     "OperationError",
+    "NoActions",
     "OutputBudget",
     "OutputBudgetExceeded",
     "ParsedCommand",
@@ -69,10 +75,13 @@ __all__ = [
     "ReferenceValue",
     "RenderOptions",
     "SuccessEnvelope",
+    "SuccessOutcome",
     "__version__",
     "action",
     "bundled_skill_path",
     "encode_scalar",
+    "error_outcome",
     "render",
     "render_envelope",
+    "success_outcome",
 ]

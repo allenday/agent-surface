@@ -94,6 +94,25 @@ class ErrorInfo(ContractModel):
     retryable: bool = False
 
 
+class SuccessOutcome[ResultT](ContractModel):
+    """Transport-neutral successful invocation payload."""
+
+    schema_version: Literal["1"] = "1"
+    ok: Literal[True] = True
+    result: ResultT
+    next_actions: ActionCollection = Field(default_factory=ActionCollection)
+
+
+class ErrorOutcome(ContractModel):
+    """Transport-neutral failed invocation payload."""
+
+    schema_version: Literal["1"] = "1"
+    ok: Literal[False] = False
+    error: ErrorInfo
+    fix: str | None = None
+    next_actions: ActionCollection = Field(default_factory=ActionCollection)
+
+
 class SuccessEnvelope[ResultT](ContractModel):
     """Successful agent-facing invocation result."""
 
@@ -122,7 +141,9 @@ __all__ = [
     "ErrorDetail",
     "ErrorEnvelope",
     "ErrorInfo",
+    "ErrorOutcome",
     "ParsedCommand",
     "ResolvedCommand",
     "SuccessEnvelope",
+    "SuccessOutcome",
 ]
