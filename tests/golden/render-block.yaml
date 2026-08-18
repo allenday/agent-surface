@@ -1,0 +1,11 @@
+name: café
+profile:
+  labels:
+    env: prod
+    region: ap-southeast
+  tags:
+  - alpha
+  - βeta
+  notes: |-
+    first line
+    second line

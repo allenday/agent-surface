@@ -1,0 +1,110 @@
+"""Deterministic human-readable and machine-readable document rendering."""
+
+import json
+from collections.abc import Mapping, Sequence
+from io import StringIO
+from typing import Any, Literal
+
+from pydantic import Field, TypeAdapter
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.scalarstring import LiteralScalarString
+
+from agent_surface.budgets import OutputBudget
+from agent_surface.contracts import ContractModel
+
+DocumentFormat = Literal["yaml", "json"]
+YamlStyle = Literal["auto", "flow", "block"]
+
+_AUTO_FLOW_MAX_ITEMS = 6
+_AUTO_FLOW_MAX_WIDTH = 100
+_JSON_VALUE = TypeAdapter(Any)
+
+
+class RenderOptions(ContractModel):
+    """Format, presentation style, and limits for one rendered document."""
+
+    format: DocumentFormat = "yaml"
+    yaml_style: YamlStyle = "auto"
+    budget: OutputBudget = Field(default_factory=OutputBudget)
+
+
+def render(value: Any, *, options: RenderOptions | None = None) -> str:
+    """Render one complete JSON-compatible value without mutating its semantics."""
+
+    selected = options or RenderOptions()
+    normalized = _JSON_VALUE.dump_python(value, mode="json")
+    if selected.format == "json":
+        return json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
+    return _render_yaml(normalized, selected.yaml_style)
+
+
+def _render_yaml(value: Any, style: YamlStyle) -> str:
+    yaml = YAML()
+    yaml.allow_unicode = True
+    yaml.width = 4096
+    yaml.default_flow_style = None
+    stream = StringIO()
+    yaml.dump(_styled_value(value, style), stream)
+    return stream.getvalue()
+
+
+def _styled_value(value: Any, style: YamlStyle) -> Any:
+    if isinstance(value, Mapping):
+        mapping = CommentedMap(
+            (key, _styled_value(item, style)) for key, item in value.items()
+        )
+        _set_collection_style(mapping, value, style)
+        return mapping
+    if _is_sequence(value):
+        sequence = CommentedSeq(_styled_value(item, style) for item in value)
+        _set_collection_style(sequence, value, style)
+        return sequence
+    if isinstance(value, str) and "\n" in value and style != "flow":
+        return LiteralScalarString(value)
+    return value
+
+
+def _set_collection_style(
+    rendered: CommentedMap | CommentedSeq,
+    original: Mapping[str, Any] | Sequence[Any],
+    style: YamlStyle,
+) -> None:
+    if style == "flow" or (style == "auto" and _eligible_for_auto_flow(original)):
+        rendered.fa.set_flow_style()
+    else:
+        rendered.fa.set_block_style()
+
+
+def _eligible_for_auto_flow(value: Mapping[str, Any] | Sequence[Any]) -> bool:
+    if len(value) > _AUTO_FLOW_MAX_ITEMS:
+        return False
+    items = value.values() if isinstance(value, Mapping) else value
+    if any(_is_collection(item) or _is_multiline(item) for item in items):
+        return False
+    return len(_isolated_flow_yaml(value).rstrip("\n")) <= _AUTO_FLOW_MAX_WIDTH
+
+
+def _isolated_flow_yaml(value: Mapping[str, Any] | Sequence[Any]) -> str:
+    yaml = YAML(typ="safe", pure=True)
+    yaml.allow_unicode = True
+    yaml.default_flow_style = True
+    yaml.width = 4096
+    stream = StringIO()
+    yaml.dump(value, stream)
+    return stream.getvalue()
+
+
+def _is_collection(value: Any) -> bool:
+    return isinstance(value, Mapping) or _is_sequence(value)
+
+
+def _is_sequence(value: Any) -> bool:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+
+
+def _is_multiline(value: Any) -> bool:
+    return isinstance(value, str) and "\n" in value
+
+
+__all__ = ["RenderOptions", "render"]
