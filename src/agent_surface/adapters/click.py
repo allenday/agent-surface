@@ -704,6 +704,7 @@ class ClickAdapter:
                     error,
                     plan,
                     raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
+                    sensitive_values=self._sensitive_param_values(plan, params),
                 ),
                 exit_code=2,
                 operation=plan.operation,
@@ -726,6 +727,7 @@ class ClickAdapter:
                     error,
                     plan,
                     raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
+                    sensitive_values=self._sensitive_param_values(plan, params),
                 ),
                 exit_code=4,
                 operation=plan.operation,
@@ -853,7 +855,7 @@ class ClickAdapter:
             except OutputBudgetExceeded:
                 emergency = ErrorEnvelope(
                     command=CommandView(
-                        raw=(self._app.name,),
+                        raw=("agent-surface",),
                         parsed=ParsedCommand(path=()),
                     ),
                     error=error_outcome(
@@ -970,12 +972,15 @@ class ClickAdapter:
         plan: CliCommandPlan,
         *,
         raw: tuple[str, ...],
+        sensitive_values: tuple[Any, ...],
     ) -> OperationError:
         sensitive = {field.name for field in plan.fields if field.sensitive}
         secrets = _sensitive_raw_values(raw, plan)
 
         def redact(value: Any, key: str | None = None) -> Any:
             if key in sensitive:
+                return _REDACTED
+            if any(type(value) is type(secret) and value == secret for secret in sensitive_values):
                 return _REDACTED
             if isinstance(value, dict):
                 return {item_key: redact(item, str(item_key)) for item_key, item in value.items()}
@@ -1007,6 +1012,17 @@ class ClickAdapter:
             details=tuple(details),
             fix=_redact_text(error.fix, secrets) if error.fix is not None else None,
             retryable=error.retryable,
+        )
+
+    @staticmethod
+    def _sensitive_param_values(
+        plan: CliCommandPlan,
+        params: dict[str, Any],
+    ) -> tuple[Any, ...]:
+        return tuple(
+            params[field.name]
+            for field in plan.fields
+            if field.sensitive and field.name in params
         )
 
 

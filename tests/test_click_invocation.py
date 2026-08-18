@@ -476,6 +476,26 @@ def test_sensitive_typed_scalar_in_arbitrary_detail_key_is_redacted() -> None:
     assert "123456" not in result.output
 
 
+def test_sensitive_boolean_in_arbitrary_detail_key_is_redacted() -> None:
+    class Request(BaseModel):
+        secret: bool = Field(json_schema_extra={"sensitive": True})
+
+    app = App("vault")
+
+    @app.operation("flags.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "flag_rejected",
+            "Flag rejected",
+            details=({"context": {"provided": request.secret}},),
+        )
+
+    result, document = invoke_json(app, ["flags", "inspect", "--secret"])
+
+    assert result.exit_code == 4
+    assert document["error"]["details"][0]["value"]["context"]["provided"] == "<redacted>"
+
+
 def test_error_command_is_compacted_only_after_budget_failure() -> None:
     value = "x" * 300
     class LongRequest(BaseModel):
@@ -517,7 +537,7 @@ def test_error_fallback_bounds_high_cardinality_parsed_mapping() -> None:
         "WideRequest",
         **{f"field_{index}": (str, ...) for index in range(100)},
     )
-    app = App("wide")
+    app = App("x" * 2_000)
 
     def reject(request):
         raise OperationError("rejected", "Rejected")
