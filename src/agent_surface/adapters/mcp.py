@@ -9,6 +9,7 @@ from typing import Any
 try:
     import mcp_types as types
     from mcp.server.lowlevel import Server
+    from mcp.server.stdio import stdio_server
     from mcp.shared.exceptions import MCPError
 except ModuleNotFoundError as error:  # pragma: no cover - exercised in subprocess isolation
     raise ModuleNotFoundError(
@@ -61,6 +62,21 @@ class MCPAdapter:
     @property
     def server(self) -> Server[Any]:
         return self._server
+
+    async def run_stdio(self) -> None:
+        """Serve MCP over the SDK's stdio transport until the stream closes."""
+
+        async with stdio_server() as (read_stream, write_stream):
+            await self._server.run(
+                read_stream,
+                write_stream,
+                self._server.create_initialization_options(),
+            )
+
+    def streamable_http_app(self, **kwargs: Any) -> Any:
+        """Return the SDK-owned Streamable HTTP ASGI application."""
+
+        return self._server.streamable_http_app(**kwargs)
 
     async def _list_tools(
         self,
