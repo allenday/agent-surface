@@ -101,16 +101,16 @@ def encode_scalar(value: object) -> str:
     """Encode safe scalar slot values without incidental object stringification."""
 
     if isinstance(value, Enum):
-        if isinstance(value.value, str):
+        if type(value.value) is str:
             return value.value
         return _unsupported_scalar(value)
-    if isinstance(value, str):
+    if type(value) is str:
         return value
-    if isinstance(value, bool):
+    if type(value) is bool:
         return "true" if value else "false"
-    if isinstance(value, int):
+    if type(value) is int:
         return str(value)
-    if isinstance(value, float) and math.isfinite(value):
+    if type(value) is float and math.isfinite(value):
         return repr(value)
     if value is None:
         return "null"

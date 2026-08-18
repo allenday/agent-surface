@@ -3,9 +3,11 @@
 import base64
 import binascii
 import inspect
+import types
+import typing
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, get_type_hints
+from typing import Any, Protocol, get_args, get_origin, get_type_hints
 
 from agent_surface.budgets import OutputBudget
 from agent_surface.contracts import Action, ActionCollection
@@ -82,7 +84,11 @@ class ActionCompiler:
                     name=name,
                     annotation=field.annotation,
                     required=field.is_required(),
-                    default=_MISSING if field.is_required() else field.default,
+                    default=(
+                        _MISSING
+                        if field.is_required()
+                        else field.get_default(call_default_factory=True, validated_data={})
+                    ),
                 )
                 for name, field in definition.input_model.model_fields.items()
             )
@@ -99,10 +105,16 @@ class ActionCompiler:
 
     def compile_object(self, instance: object) -> tuple[ActionCandidate, ...]:
         decorated: dict[str, tuple[Callable[..., Any], _ActionMetadata]] = {}
-        for owner in reversed(type(instance).__mro__[:-1]):
+        seen: set[str] = set()
+        for owner in type(instance).__mro__[:-1]:
             for name, value in owner.__dict__.items():
-                metadata = getattr(value, _ACTION_METADATA, None)
-                if metadata is not None and inspect.isfunction(value):
+                if name in seen:
+                    continue
+                seen.add(name)
+                if not inspect.isfunction(value):
+                    continue
+                metadata = value.__dict__.get(_ACTION_METADATA)
+                if metadata is not None:
                     decorated[name] = (value, metadata)
 
         return tuple(
@@ -285,11 +297,55 @@ class ActionPublisher:
 def _compatible(annotation: Any, value: object) -> bool:
     if annotation is Any:
         return True
+
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+    if origin is typing.Annotated:
+        return bool(arguments) and _compatible(arguments[0], value)
+    if origin in (typing.Union, types.UnionType):
+        return any(_compatible(member, value) for member in arguments)
+    if origin is typing.Literal:
+        return any(type(value) is type(member) and value == member for member in arguments)
+    if origin is list:
+        return (
+            type(value) is list
+            and len(arguments) == 1
+            and all(_compatible(arguments[0], item) for item in value)
+        )
+    if origin is set:
+        return (
+            type(value) is set
+            and len(arguments) == 1
+            and all(_compatible(arguments[0], item) for item in value)
+        )
+    if origin is frozenset:
+        return (
+            type(value) is frozenset
+            and len(arguments) == 1
+            and all(_compatible(arguments[0], item) for item in value)
+        )
+    if origin is tuple:
+        if type(value) is not tuple:
+            return False
+        if len(arguments) == 2 and arguments[1] is Ellipsis:
+            return all(_compatible(arguments[0], item) for item in value)
+        return len(arguments) == len(value) and all(
+            _compatible(member, item) for member, item in zip(arguments, value, strict=True)
+        )
+    if origin is dict:
+        return (
+            type(value) is dict
+            and len(arguments) == 2
+            and all(
+                _compatible(arguments[0], key) and _compatible(arguments[1], item)
+                for key, item in value.items()
+            )
+        )
     if isinstance(annotation, type):
         if annotation in (bool, int, float, str):
             return type(value) is annotation
         return isinstance(value, annotation)
-    return True
+    return False
 
 
 def _annotation_name(annotation: Any) -> str:

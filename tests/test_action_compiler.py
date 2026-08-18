@@ -1,7 +1,7 @@
 from dataclasses import FrozenInstanceError
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent_surface import App
 from agent_surface.actions import ActionCompiler, ActionDefinitionError, action
@@ -78,6 +78,47 @@ def test_compiles_only_decorated_methods_across_mro_without_descriptor_access() 
     assert [slot.name for slot in candidate.slots] == ["ref", "detail"]
     assert candidate.slots[0].annotation is str
     assert candidate.slots[1].default == "summary"
+
+
+def test_class_dictionary_scan_does_not_touch_hostile_ordinary_attributes() -> None:
+    class Tripwire:
+        def __getattribute__(self, name: str):
+            if name == "__agent_surface_action__":
+                raise AssertionError("ordinary class attributes must remain untouched")
+            return super().__getattribute__(name)
+
+    class WithTripwire(BaseActions):
+        ordinary_value = Tripwire()
+
+    candidates = ActionCompiler(app_with_operations().operations).compile_object(WithTripwire())
+
+    assert len(candidates) == 1
+
+
+def test_undecorated_subclass_override_suppresses_decorated_base_method() -> None:
+    class Override(BaseActions):
+        def inspect(self, ref: str) -> None:
+            pass
+
+    candidates = ActionCompiler(app_with_operations().operations).compile_object(Override())
+
+    assert candidates == ()
+
+
+def test_pydantic_default_factory_is_materialized_as_the_slot_default() -> None:
+    class FactoryInput(BaseModel):
+        ref: str = Field(default_factory=lambda: "generated-ref")
+
+    app = App("factory")
+
+    @app.operation("resource.factory")
+    def factory(request: FactoryInput) -> InspectResult:
+        return InspectResult(status=request.ref)
+
+    candidate = ActionCompiler(app.operations).compile_operations()[0]
+
+    assert candidate.slots[0].required is False
+    assert candidate.slots[0].default == "generated-ref"
 
 
 @pytest.mark.parametrize("case", ["variadic", "unannotated", "unknown"])

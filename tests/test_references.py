@@ -127,3 +127,15 @@ def test_scalar_tokens_are_canonical(value: object, token: str) -> None:
 def test_unsupported_scalars_are_rejected(value: object) -> None:
     with pytest.raises(MissingReferenceCodec):
         encode_scalar(value)
+
+
+def test_scalar_subclasses_cannot_override_canonical_token_encoding() -> None:
+    class EvilInt(int):
+        def __str__(self) -> str:
+            return "ATTACKER-TOKEN"
+
+        def __repr__(self) -> str:
+            return "ATTACKER-TOKEN"
+
+    with pytest.raises(MissingReferenceCodec):
+        encode_scalar(EvilInt(7))

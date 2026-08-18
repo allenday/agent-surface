@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from typing import Annotated, Literal
 
 import pytest
 
@@ -165,6 +166,53 @@ def test_bound_custom_object_without_codec_fails_instead_of_stringifying() -> No
             (candidate(ActionSlotPlan(name="ref", annotation=Resource, required=True)),),
             values={"ref": Resource(key="one", title="One")},
         )
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        Resource | None,
+        Annotated[Resource, "reference"],
+        Literal["known-resource"],
+        list[Resource],
+        tuple[Resource, ...],
+        dict[str, Resource],
+    ],
+)
+def test_structured_annotation_rejects_unrelated_codec_backed_object(
+    annotation: object,
+) -> None:
+    @dataclass(frozen=True)
+    class Other:
+        key: str
+
+    class OtherCodec:
+        kind = "other"
+        python_type = Other
+
+        def encode(self, value: Other) -> str:
+            return value.key
+
+        def decode(self, token: str) -> Other:
+            return Other(key=token)
+
+        def display(self, value: Other) -> str:
+            return value.key
+
+    references = ReferenceRegistry()
+    references.register(OtherCodec())
+    publisher = ActionPublisher(
+        references=references,
+        policy=AllowActions(frozenset({"resource.inspect"})),
+    )
+
+    published = publisher.publish(
+        (candidate(ActionSlotPlan(name="ref", annotation=annotation, required=True)),),
+        values={"ref": Other(key="wrong-type")},
+    )[0]
+
+    assert published.command is None
+    assert published.command_template[-1] == "{ref}"  # type: ignore[index]
 
 
 def test_unbound_slot_retains_one_paginated_source_without_expansion() -> None:
