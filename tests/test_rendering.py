@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_serializer
 from ruamel.yaml import YAML
 
 from agent_surface import (
@@ -32,6 +32,14 @@ class Payload(BaseModel):
 
     name: str
     profile: Profile
+
+
+class SerializedCollection(BaseModel):
+    count: int
+
+    @field_serializer("count")
+    def serialize_count(self, value: int) -> list[int]:
+        return list(range(value))
 
 
 def payload() -> Payload:
@@ -152,6 +160,34 @@ def test_typed_command_structure_does_not_consume_domain_item_budget() -> None:
     document = render(envelope, options=RenderOptions(budget=OutputBudget(max_items=1)))
 
     assert load_yaml(document)["result"] == "ok"
+
+
+def test_render_budgets_collections_created_by_pydantic_serializers() -> None:
+    with pytest.raises(OutputBudgetExceeded) as raised:
+        render(
+            SerializedCollection(count=3),
+            options=RenderOptions(budget=OutputBudget(max_items=2)),
+        )
+
+    assert raised.value.path == ("count",)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ParsedCommand(path=("inspect",), args={"refs": ["one", "two", "three"]}),
+        Action(
+            rel="inspect",
+            command=("inventory", "inspect"),
+            target={"refs": ["one", "two", "three"]},
+        ),
+    ],
+)
+def test_structural_contracts_exempt_only_their_argv_sequences(value: object) -> None:
+    with pytest.raises(OutputBudgetExceeded) as raised:
+        render(value, options=RenderOptions(budget=OutputBudget(max_items=2)))
+
+    assert raised.value.code == "item_budget_exceeded"
 
 
 def test_explicit_bounded_collection_renders_without_ellipsis_placeholder() -> None:

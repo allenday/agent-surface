@@ -59,10 +59,12 @@ item validation recognizes both collection contracts but does not mutate them.
 ### Renderer
 
 `render(value, options=RenderOptions()) -> str` accepts Pydantic models and JSON-compatible Python
-values. It first validates marked and unmarked domain collections against the item budget, explicitly
-exempting structural argv, parser-path, flag, and action-command sequences on typed contracts. It then
-converts models to JSON-compatible values and serializes deterministically. The low-level function
-raises `OutputBudgetExceeded` rather than returning partial data.
+values. It derives exact exemption paths for structural argv, parser-path, flag, and action-command
+sequences on typed contracts, converts models to JSON-compatible values, then validates every other
+serialized collection against the item budget. This ordering includes collections created by Pydantic
+field serializers without making command metadata consume the domain item budget. Serialization is
+deterministic, and the low-level function raises `OutputBudgetExceeded` rather than returning partial
+data.
 
 `render_envelope(envelope, options=RenderOptions()) -> str` is the adapter-ready entry point. If an
 item or byte budget is exceeded, it renders a compact `ErrorEnvelope` with the original command,

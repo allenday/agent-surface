@@ -10,10 +10,9 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import LiteralScalarString
 
-from agent_surface.budgets import BoundedCollection, OutputBudget, OutputBudgetExceeded
+from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
 from agent_surface.contracts import (
     Action,
-    ActionCollection,
     CommandView,
     ContractModel,
     ErrorDetail,
@@ -43,8 +42,9 @@ def render(value: Any, *, options: RenderOptions | None = None) -> str:
     """Render one complete JSON-compatible value without mutating its semantics."""
 
     selected = options or RenderOptions()
-    _validate_item_budget(value, selected.budget)
+    structural_sequences = _structural_sequence_paths(value)
     normalized = _JSON_VALUE.dump_python(value, mode="json")
+    _validate_item_budget(normalized, selected.budget, structural_sequences)
     if selected.format == "json":
         document = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
     else:
@@ -88,61 +88,81 @@ def render_envelope(
 def _validate_item_budget(
     value: Any,
     budget: OutputBudget,
+    structural_sequences: set[tuple[str | int, ...]],
     path: tuple[str | int, ...] = (),
 ) -> None:
-    if isinstance(value, SuccessEnvelope):
-        _validate_item_budget(value.result, budget, (*path, "result"))
-        _validate_item_budget(value.next_actions, budget, (*path, "next_actions"))
-        return
-    if isinstance(value, ErrorEnvelope):
-        _validate_item_budget(value.error, budget, (*path, "error"))
-        _validate_item_budget(value.next_actions, budget, (*path, "next_actions"))
-        return
-    if isinstance(value, BoundedCollection):
-        _validate_sequence_budget(value.items, budget, (*path, "items"))
-        return
-    if isinstance(value, ActionCollection):
-        _validate_sequence_budget(value.items, budget, (*path, "items"))
-        return
-    if isinstance(value, ErrorInfo):
-        _validate_sequence_budget(value.details, budget, (*path, "details"))
-        return
-    if isinstance(value, ErrorDetail):
-        _validate_item_budget(value.value, budget, (*path, "value"))
-        return
-    if isinstance(value, (Action, CommandView, ParsedCommand)):
-        return
-    if isinstance(value, BaseModel):
-        for field_name in type(value).model_fields:
-            _validate_item_budget(
-                getattr(value, field_name),
-                budget,
-                (*path, field_name),
-            )
-        return
     if _is_sequence(value):
-        _validate_sequence_budget(value, budget, path)
+        if path not in structural_sequences and len(value) > budget.max_items:
+            raise OutputBudgetExceeded(
+                code="item_budget_exceeded",
+                message="Collection exceeds the item budget",
+                path=path,
+                details={"returned": len(value), "max_items": budget.max_items},
+                fix="Use a bounded collection with a continuation action.",
+            )
+        for index, item in enumerate(value):
+            _validate_item_budget(
+                item,
+                budget,
+                structural_sequences,
+                (*path, index),
+            )
         return
     if isinstance(value, Mapping):
         for key, item in value.items():
-            _validate_item_budget(item, budget, (*path, str(key)))
+            _validate_item_budget(
+                item,
+                budget,
+                structural_sequences,
+                (*path, str(key)),
+            )
 
 
-def _validate_sequence_budget(
-    value: Sequence[Any],
-    budget: OutputBudget,
-    path: tuple[str | int, ...],
-) -> None:
-    if len(value) > budget.max_items:
-        raise OutputBudgetExceeded(
-            code="item_budget_exceeded",
-            message="Collection exceeds the item budget",
-            path=path,
-            details={"returned": len(value), "max_items": budget.max_items},
-            fix="Use a bounded collection with a continuation action.",
-        )
-    for index, item in enumerate(value):
-        _validate_item_budget(item, budget, (*path, index))
+def _structural_sequence_paths(
+    value: Any,
+    path: tuple[str | int, ...] = (),
+) -> set[tuple[str | int, ...]]:
+    paths: set[tuple[str | int, ...]] = set()
+    if isinstance(value, CommandView):
+        paths.add((*path, "raw"))
+        paths.update(_structural_sequence_paths(value.parsed, (*path, "parsed")))
+        return paths
+    if isinstance(value, ParsedCommand):
+        paths.update({(*path, "path"), (*path, "flags")})
+        paths.update(_structural_sequence_paths(value.args, (*path, "args")))
+        paths.update(_structural_sequence_paths(value.options, (*path, "options")))
+        return paths
+    if isinstance(value, Action):
+        paths.update({(*path, "command"), (*path, "command_template")})
+        for field_name in ("target", "bound", "slots"):
+            paths.update(
+                _structural_sequence_paths(
+                    getattr(value, field_name),
+                    (*path, field_name),
+                )
+            )
+        return paths
+    if isinstance(value, ErrorDetail):
+        paths.add((*path, "path"))
+        paths.update(_structural_sequence_paths(value.value, (*path, "value")))
+        return paths
+    if isinstance(value, BaseModel):
+        for field_name in type(value).model_fields:
+            paths.update(
+                _structural_sequence_paths(
+                    getattr(value, field_name),
+                    (*path, field_name),
+                )
+            )
+        return paths
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            paths.update(_structural_sequence_paths(item, (*path, str(key))))
+        return paths
+    if _is_sequence(value):
+        for index, item in enumerate(value):
+            paths.update(_structural_sequence_paths(item, (*path, index)))
+    return paths
 
 
 def _validate_byte_budget(document: str, budget: OutputBudget) -> None:
