@@ -185,3 +185,22 @@ def test_destructive_confirm_field_must_be_boolean() -> None:
         CliPlanCompiler(app.operations).compile()
 
     assert raised.value.code == "cli_parameter_conflict"
+
+
+def test_required_optional_field_remains_required() -> None:
+    class RequiredNullableRequest(BaseModel):
+        value: str | None
+
+    field = CliPlanCompiler(app_for(RequiredNullableRequest).operations).compile()[0].fields[0]
+
+    assert field.required is True
+
+
+def test_repeated_positional_field_is_rejected_as_lossy() -> None:
+    class RepeatedArgumentRequest(BaseModel):
+        values: list[str] = Field(json_schema_extra={"cli": {"kind": "argument"}})
+
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app_for(RepeatedArgumentRequest).operations).compile()
+
+    assert raised.value.code == "unsupported_cli_field"

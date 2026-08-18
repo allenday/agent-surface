@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import math
 import types
 import typing
 from collections.abc import Callable, Sequence
@@ -26,7 +27,7 @@ from agent_surface.operations import (
     OperationRegistry,
 )
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome
-from agent_surface.references import ReferenceRegistry
+from agent_surface.references import ReferenceError, ReferenceRegistry
 from agent_surface.rendering import RenderOptions, render, render_envelope
 
 CliParameterKind = Literal["argument", "option"]
@@ -121,7 +122,7 @@ class CliPlanCompiler:
         )
 
     def _compile_field(self, name: str, field: Any) -> CliFieldPlan:
-        annotation, optional = _unwrap_optional(field.annotation)
+        annotation, _ = _unwrap_optional(field.annotation)
         item_annotation, multiple = _unwrap_collection(annotation)
         value_kind, choices, reference_type = self._value_shape(name, item_annotation)
         extra = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
@@ -136,7 +137,7 @@ class CliPlanCompiler:
             kind=kind,
             value_kind=value_kind,
             annotation=field.annotation,
-            required=field.is_required() and not optional,
+            required=field.is_required(),
             multiple=multiple,
             choices=choices,
             help=field.description or "",
@@ -226,6 +227,12 @@ class CliPlanCompiler:
                     "cli_parameter_conflict",
                     f"Field conflicts with a generated rendering option: {field.name}",
                     fix=f"Rename {field.name}; --format and --yaml-style belong to the adapter.",
+                )
+            if field.kind == "argument" and field.multiple:
+                raise CliDefinitionError(
+                    "unsupported_cli_field",
+                    f"Cannot project repeated positional field {field.name} losslessly",
+                    fix="Project the repeated field as an option.",
                 )
             if definition.destructive and field.name == "confirm" and field.value_kind != "boolean":
                 raise CliDefinitionError(
@@ -554,7 +561,15 @@ class ClickAdapter:
         def callback(context: click.Context, /, **params: Any) -> None:
             self._invoke(context, plan, params)
 
-        parameters = [_click_parameter(field) for field in plan.fields]
+        parameters = [
+            _click_parameter(
+                field,
+                required_override=False
+                if plan.destructive and field.name == "confirm"
+                else None,
+            )
+            for field in plan.fields
+        ]
         if plan.destructive and not any(field.name == "confirm" for field in plan.fields):
             parameters.append(
                 click.Option(
@@ -584,8 +599,37 @@ class ClickAdapter:
         document_format = params.pop("_surface_format")
         yaml_style = params.pop("_surface_yaml_style")
         transport_confirm = params.pop("_surface_confirm", False)
-        command = self._command_view(context, plan, params)
-        payload = self._payload(context, plan, params)
+        command = self._command_view(
+            context,
+            plan,
+            params,
+            transport_confirm=transport_confirm,
+        )
+        try:
+            payload = self._payload(context, plan, params)
+        except ReferenceError as error:
+            self._emit_error(
+                command,
+                OperationError(error.code, str(error), fix=error.fix),
+                exit_code=2,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+        except Exception:
+            self._emit_error(
+                command,
+                OperationError(
+                    "invalid_reference",
+                    "Reference token could not be decoded",
+                    fix="Use a reference returned by discovery.",
+                ),
+                exit_code=2,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
+
         confirmed = transport_confirm or payload.get("confirm") is True
         if plan.destructive and not confirmed:
             self._emit_error(
@@ -640,7 +684,7 @@ class ClickAdapter:
         except OperationError as error:
             self._emit_error(
                 command,
-                error,
+                self._redact_error(error, plan),
                 exit_code=4,
                 operation=plan.operation,
                 document_format=document_format,
@@ -690,6 +734,8 @@ class ClickAdapter:
         context: click.Context,
         plan: CliCommandPlan,
         params: dict[str, Any],
+        *,
+        transport_confirm: bool = False,
     ) -> CommandView:
         arguments: dict[str, Any] = {}
         options: dict[str, Any] = {}
@@ -704,6 +750,8 @@ class ClickAdapter:
                 flags.append(field.name if value is True else f"no-{field.name.replace('_', '-')}")
             else:
                 options[field.name] = value
+        if transport_confirm:
+            flags.append("confirm")
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *plan.path)))
         return CommandView(
             raw=_redact_raw(raw, plan),
@@ -731,7 +779,7 @@ class ClickAdapter:
         )
         outcome = error_outcome(error, next_actions=actions)
         envelope = ErrorEnvelope(
-            command=command,
+            command=_compact_command(command),
             error=outcome.error,
             fix=outcome.fix,
             next_actions=outcome.next_actions,
@@ -1074,23 +1122,28 @@ def _compact_command(command: CommandView) -> CommandView:
     )
 
 
-def _click_parameter(field: CliFieldPlan) -> click.Parameter:
+def _click_parameter(
+    field: CliFieldPlan,
+    *,
+    required_override: bool | None = None,
+) -> click.Parameter:
+    required = field.required if required_override is None else required_override
     parameter_type = _click_type(field)
     if field.kind == "argument":
         return click.Argument(
             field.parameter_decls,
-            required=field.required,
+            required=required,
             type=parameter_type,
         )
     declarations = field.parameter_decls
     if field.value_kind == "boolean":
         declarations = (f"{declarations[0]}/--no-{declarations[0][2:]}",)
     option_kwargs: dict[str, Any] = {}
-    if not field.required:
+    if not required:
         option_kwargs["default"] = () if field.multiple else None
     return click.Option(
         declarations,
-        required=field.required,
+        required=required,
         type=parameter_type,
         multiple=field.multiple,
         is_flag=field.value_kind == "boolean",
@@ -1105,12 +1158,30 @@ def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:
         return click.Choice(field.choices, case_sensitive=True)
     return {
         "boolean": click.BOOL,
-        "float": click.FLOAT,
+        "float": _FINITE_FLOAT,
         "integer": click.INT,
         "path": click.Path(path_type=str),
         "reference": click.STRING,
         "string": click.STRING,
     }[field.value_kind]
+
+
+class _FiniteFloat(click.ParamType[float]):
+    name = "float"
+
+    def convert(
+        self,
+        value: Any,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> float:
+        converted = click.FLOAT.convert(value, param, ctx)
+        if not math.isfinite(converted):
+            self.fail(f"{value!r} is not a finite float", param, ctx)
+        return converted
+
+
+_FINITE_FLOAT = _FiniteFloat()
 
 
 def _unwrap_optional(annotation: Any) -> tuple[Any, bool]:

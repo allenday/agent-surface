@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 
+import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel, Field
 
@@ -344,3 +345,146 @@ def test_error_action_provider_receives_the_invoked_operation() -> None:
 
     assert result.exit_code == 4
     assert actions.operations == ["message.echo"]
+
+
+def test_reference_decode_failure_is_structured() -> None:
+    @dataclass(frozen=True)
+    class Ref:
+        value: str
+
+    class Codec:
+        kind = "ref"
+        python_type = Ref
+
+        def encode(self, value: Ref) -> str:
+            return value.value
+
+        def decode(self, token: str) -> Ref:
+            raise ValueError("unknown reference")
+
+        def display(self, value: Ref) -> str:
+            return value.value
+
+    class Request(BaseModel):
+        ref: Ref
+
+    app = App("refs")
+
+    @app.operation("refs.inspect")
+    def inspect(request: Request) -> EchoResult:
+        return EchoResult(message=request.ref.value)
+
+    references = ReferenceRegistry()
+    references.register(Codec())
+    result, document = invoke_json(
+        app, ["refs", "inspect", "--ref", "missing"], references=references
+    )
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "invalid_reference"
+
+
+def test_oversized_error_still_emits_a_structured_fallback() -> None:
+    class Request(BaseModel):
+        text: str = Field(max_length=3)
+
+    app = App("small")
+
+    @app.operation("text.check")
+    def check(request: Request) -> EchoResult:
+        return EchoResult(message=request.text)
+
+    options = RenderOptions(budget=OutputBudget(max_bytes=1_024))
+    result, document = invoke_json(
+        app,
+        ["text", "check", "--text", "x" * 2_000],
+        render_options=options,
+    )
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "response_too_large"
+
+
+def test_sensitive_domain_error_details_are_redacted() -> None:
+    class Request(BaseModel):
+        token: str = Field(json_schema_extra={"sensitive": True})
+
+    app = App("vault")
+
+    @app.operation("tokens.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "token_rejected",
+            "Token rejected",
+            details=({"loc": ("token",), "input": request.token},),
+        )
+
+    result, document = invoke_json(app, ["tokens", "inspect", "--token", "consumer-secret"])
+
+    assert result.exit_code == 4
+    assert "consumer-secret" not in result.output
+    assert document["error"]["details"][0]["value"] == "<redacted>"
+
+
+def test_required_confirmation_field_uses_confirmation_exit() -> None:
+    class Request(BaseModel):
+        item: str
+        confirm: bool
+
+    app = App("inventory")
+
+    @app.operation("items.delete", destructive=True)
+    def delete(request: Request) -> EchoResult:
+        return EchoResult(message=request.item)
+
+    result, document = invoke_json(app, ["items", "delete", "--item", "one"])
+
+    assert result.exit_code == 3
+    assert document["error"]["code"] == "confirmation_required"
+
+
+def test_transport_confirmation_is_present_in_parsed_flags() -> None:
+    class Request(BaseModel):
+        item: str
+
+    app = App("inventory")
+
+    @app.operation("items.delete", destructive=True)
+    def delete(request: Request) -> EchoResult:
+        return EchoResult(message=request.item)
+
+    result, document = invoke_json(app, ["items", "delete", "--item", "one", "--confirm"])
+
+    assert result.exit_code == 0
+    assert "confirm" in document["command"]["parsed"]["flags"]
+
+
+@pytest.mark.parametrize(
+    ("argument", "value", "error_code"),
+    [
+        ("--score", "nan", "invalid_value"),
+        ("--score", "inf", "invalid_value"),
+        ("--score=-1e999", None, "unknown_option"),
+    ],
+)
+def test_non_finite_float_is_rejected(
+    argument: str,
+    value: str | None,
+    error_code: str,
+) -> None:
+    class Request(BaseModel):
+        score: float
+
+    app = App("scores")
+
+    @app.operation("scores.record")
+    def record(request: Request) -> EchoResult:
+        return EchoResult(message=str(request.score))
+
+    args = ["scores", "record", argument]
+    if value is not None:
+        args.append(value)
+    result, document = invoke_json(app, args)
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == error_code
