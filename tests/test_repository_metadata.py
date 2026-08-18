@@ -58,6 +58,51 @@ def test_readme_orients_users_and_contributors() -> None:
     assert "CONTRIBUTING.md" in readme
 
 
+def test_readme_teaches_a_complete_hateoas_trajectory() -> None:
+    readme = (ROOT / "README.md").read_text()
+    normalized = readme.lower()
+
+    for required in (
+        "hateoas",
+        "five-minute",
+        "books search --query dune",
+        "books inspect --book book_dune",
+        "holds create --book book_dune --confirm",
+        "next_actions",
+        "docs/tutorials/bookstore.md",
+        "docs/concepts/hateoas.md",
+        "docs/how-to/adopt-an-existing-app.md",
+        "docs/reference/cli-contract.md",
+        "docs/reference/python-api.md",
+    ):
+        assert required in normalized
+
+
+def test_critical_directories_have_scoped_agent_instructions() -> None:
+    for path in (
+        "src/agent_surface/AGENTS.md",
+        "src/agent_surface/adapters/AGENTS.md",
+        "src/agent_surface/skills/AGENTS.md",
+        "tests/AGENTS.md",
+        "examples/AGENTS.md",
+        "docs/AGENTS.md",
+        ".github/AGENTS.md",
+    ):
+        assert (ROOT / path).is_file(), path
+
+
+def test_public_markdown_internal_links_resolve() -> None:
+    documents = [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]
+    pattern = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+
+    for document in documents:
+        for target in pattern.findall(document.read_text()):
+            if "://" in target or target.startswith("#"):
+                continue
+            relative = target.split("#", 1)[0]
+            assert (document.parent / relative).resolve().exists(), f"{document}: {target}"
+
+
 def test_agent_guide_contains_executable_repository_contract() -> None:
     guide = (ROOT / "AGENTS.md").read_text()
 
@@ -107,7 +152,7 @@ def test_adoption_boundary_is_documented_and_linked() -> None:
         "consumer-owned",
         "integration layer",
         "OperationError",
-        "planned adapter contract",
+        "shipped Click",
         "sensitive",
         "transport",
     ):

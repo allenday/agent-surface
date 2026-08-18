@@ -27,14 +27,14 @@ attaches surface policy such as `read_only`, `destructive`, `idempotent`, and `o
 Wrappers translate expected consumer exceptions into stable `OperationError` codes and repair
 guidance. They do not reproduce business logic.
 
-The models referenced by handler signatures remain consumer-owned. The registry retains those
-models today. The planned adapter contract is to inspect them when generating transport inputs so
-applications will not need parallel Click or MCP schemas. Until those adapters ship, retain
-existing transport schemas and remove them only after parity is proven.
+The models referenced by handler signatures remain consumer-owned. The registry and shipped Click
+adapter inspect those declared models when generating transport inputs, so applications do not need
+parallel CLI schemas. Retain an existing transport until parity is proven; the native MCP sibling is
+the next planned projection.
 
 ## Transport layer
 
-CLI and MCP adapters will be sibling projections of the operation registry. Never implement one
+CLI and MCP adapters are sibling projections of the operation registry. Never implement one
 transport by invoking, parsing, or reflecting the other. This preserves Pydantic constraints,
 argv boundaries, structured errors, safety metadata, and asynchronous execution without string
 round-trips.
@@ -48,7 +48,7 @@ round-trips.
 5. Remove legacy transport-specific schema and dispatch code only after parity is proven.
 
 The conformance fixture under `tests/reference_consumer/` demonstrates this boundary with entirely
-synthetic data. It is the acceptance surface for future adapters.
+synthetic data. It is an acceptance surface shared by transport adapters.
 
 ## References and action discovery
 

@@ -8,6 +8,10 @@ These instructions apply to the entire repository. User instructions take preced
 schema adapters. Pydantic models and the operation registry are the source of truth. Agent-facing
 responses are YAML-first, bounded, discoverable, and transport-neutral.
 
+The core product invariant is HATEOAS: every response should expose a small, relevant, executable
+`next_actions` frontier. Excellent human DX—runnable examples, linked explanations, normal help,
+and precise reference docs—must reinforce rather than weaken that agent contract.
+
 ## Setup and checks
 
 Work from the repository root and use the project venv. Do not install dependencies globally.
@@ -37,8 +41,12 @@ uv build
 - `src/agent_surface/actions.py`: candidate compilation, policy binding, and cursor discovery
 - `src/agent_surface/operations.py`: typed registration and invocation
 - `src/agent_surface/app.py`: public application/decorator API
+- `src/agent_surface/adapters/`: sibling transport projections; see its scoped `AGENTS.md`
 - `src/agent_surface/skills/`: bundled `SKILL.md`, `reference.md`, and future sidecars
-- `tests/`: executable behavior and package-resource contracts
+- `examples/`: executable consumer integrations and end-to-end trajectories
+- `tests/`: executable behavior and package-resource contracts; see scoped instructions
+- `docs/`: tutorials, concepts, how-to guides, references, and approved plans
+- `.github/`: CI, release, dependency, and contributor automation
 - `docs/adoption.md`: consumer domain/integration/transport boundary
 - `docs/plans/`: approved designs and implementation plans
 
@@ -62,6 +70,8 @@ uv build
 - Never use `str(object)` as a stable reference. Use an explicit reference codec.
 - Keep Click and MCP adapters thin; business logic belongs in the shared operation layer.
 - Project CLI and MCP as siblings from the registry; never implement one transport through another.
+- Keep public examples executable and documentation links valid. When output appears in docs, verify
+  it against the real command rather than hand-maintaining a divergent shape.
 - Preserve bundled skill sidecars as package data. When they change, test both source access and
   built-wheel contents.
 - Do not commit `.venv/`, `dist/`, caches, credentials, or generated artifacts.
