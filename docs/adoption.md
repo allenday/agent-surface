@@ -27,14 +27,17 @@ attaches surface policy such as `read_only`, `destructive`, `idempotent`, and `o
 Wrappers translate expected consumer exceptions into stable `OperationError` codes and repair
 guidance. They do not reproduce business logic.
 
-The models referenced by handler signatures remain consumer-owned. Agent-surface inspects those
-models to generate transport inputs; applications do not need parallel Click or MCP schemas.
+The models referenced by handler signatures remain consumer-owned. The registry retains those
+models today. The planned adapter contract is to inspect them when generating transport inputs so
+applications will not need parallel Click or MCP schemas. Until those adapters ship, retain
+existing transport schemas and remove them only after parity is proven.
 
 ## Transport layer
 
-CLI and MCP are sibling projections of the operation registry. Never implement one transport by
-invoking, parsing, or reflecting the other. This preserves Pydantic constraints, argv boundaries,
-structured errors, safety metadata, and asynchronous execution without string round-trips.
+CLI and MCP adapters will be sibling projections of the operation registry. Never implement one
+transport by invoking, parsing, or reflecting the other. This preserves Pydantic constraints,
+argv boundaries, structured errors, safety metadata, and asynchronous execution without string
+round-trips.
 
 ## Staged migration
 

@@ -66,10 +66,10 @@ def test_domain_mutation_requires_confirmation_and_never_returns_secret() -> Non
 
     with pytest.raises(domain.ConfirmationRequired):
         service.mutate(request)
+    assert "consumer-secret" not in repr(request)
 
     result = service.mutate(request.model_copy(update={"confirm": True}))
     assert result.changed is True
-    assert "consumer-secret" not in repr(result)
     assert "agent_surface" not in inspect.getsource(type(service))
 
 
@@ -84,7 +84,13 @@ def test_integration_registers_consumer_models_and_safety_metadata() -> None:
     assert definitions["resource.lookup"].output_model is domain.ResourceRecord
     assert definitions["resource.lookup"].read_only is True
     assert definitions["resource.lookup"].idempotent is True
+    assert definitions["resource.list"].input_model is domain.ListRequest
+    assert definitions["resource.list"].output_model is domain.ResourcePage
     assert definitions["resource.list"].read_only is True
+    assert definitions["resource.list"].idempotent is True
+    assert definitions["resource.list"].open_world is True
+    assert definitions["resource.mutate"].input_model is domain.MutationRequest
+    assert definitions["resource.mutate"].output_model is domain.MutationResult
     assert definitions["resource.mutate"].destructive is True
 
 

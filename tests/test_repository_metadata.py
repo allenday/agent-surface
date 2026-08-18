@@ -107,6 +107,7 @@ def test_adoption_boundary_is_documented_and_linked() -> None:
         "consumer-owned",
         "integration layer",
         "OperationError",
+        "planned adapter contract",
         "sensitive",
         "transport",
     ):
