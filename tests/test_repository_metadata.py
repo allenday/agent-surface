@@ -149,6 +149,9 @@ def test_release_uses_separate_oidc_environments_and_one_build() -> None:
     assert workflow["jobs"]["publish-pypi"]["needs"] == "build"
 
     source = (ROOT / ".github/workflows/release.yml").read_text()
+    assert "make check" in source
+    assert "GITHUB_REF_NAME" in source
+    assert "pyproject.toml" in source
     assert "repository-url: https://test.pypi.org/legacy/" in source
     assert "password:" not in source
 
