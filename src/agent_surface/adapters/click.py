@@ -294,8 +294,18 @@ class ClickAdapter:
         return root
 
     def _add_discovery(self, root: click.Group) -> None:
-        operations = click.Group("operations", help="Discover registered operations.")
-        actions = click.Group("actions", help="Discover policy-approved actions.")
+        operations = _SurfaceGroup(
+            "operations",
+            help="Discover registered operations.",
+            adapter=self,
+            path=("operations",),
+        )
+        actions = _SurfaceGroup(
+            "actions",
+            help="Discover policy-approved actions.",
+            adapter=self,
+            path=("actions",),
+        )
         catalog = OperationCatalog(
             self._app.operations,
             discovery_command=(self._app.name, "operations", "list"),
@@ -447,35 +457,43 @@ class ClickAdapter:
             )
 
         operations.add_command(
-            click.Command(
+            _SurfaceDiscoveryCommand(
                 "list",
                 callback=list_operations,
                 params=[*_pagination_parameters(), *_render_parameters()],
                 help="List a bounded page of registered operations.",
+                adapter=self,
+                path=("operations", "list"),
             )
         )
         operations.add_command(
-            click.Command(
+            _SurfaceDiscoveryCommand(
                 "describe",
                 callback=describe_operation,
                 params=[click.Argument(("name",), required=True), *_render_parameters()],
                 help="Describe one operation and its Pydantic schemas.",
+                adapter=self,
+                path=("operations", "describe"),
             )
         )
         actions.add_command(
-            click.Command(
+            _SurfaceDiscoveryCommand(
                 "list",
                 callback=list_actions,
                 params=[*_pagination_parameters(), *_render_parameters()],
                 help="List a bounded page of policy-approved actions.",
+                adapter=self,
+                path=("actions", "list"),
             )
         )
         actions.add_command(
-            click.Command(
+            _SurfaceDiscoveryCommand(
                 "explain",
                 callback=explain_action,
                 params=[click.Argument(("operation",), required=True), *_render_parameters()],
                 help="Explain one policy-approved action.",
+                adapter=self,
+                path=("actions", "explain"),
             )
         )
         root.add_command(operations)
@@ -775,6 +793,32 @@ class ClickAdapter:
             yaml_style=yaml_style,
         )
 
+    def _emit_discovery_parse_error(
+        self,
+        context: click.Context,
+        path: tuple[str, ...],
+        error: click.ClickException,
+    ) -> typing.Never:
+        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
+        document_format, yaml_style = _render_choices_from_raw(raw)
+        code = {
+            click.MissingParameter: "missing_parameter",
+            click.BadParameter: "invalid_value",
+            click.NoSuchOption: "unknown_option",
+        }.get(type(error), "invalid_command")
+        self._emit_error(
+            CommandView(raw=raw, parsed=ParsedCommand(path=path)),
+            OperationError(
+                code,
+                error.format_message(),
+                fix=f"Run {self._app.name} {path[0]} --help for valid usage.",
+            ),
+            exit_code=2,
+            operation=".".join(path),
+            document_format=document_format,
+            yaml_style=yaml_style,
+        )
+
     def _selected_render_options(self, document_format: str, yaml_style: str) -> RenderOptions:
         return self._render_options.model_copy(
             update={"format": document_format, "yaml_style": yaml_style}
@@ -866,6 +910,25 @@ class _SurfaceCommand(click.Command):
             return super().parse_args(ctx, args)
         except click.ClickException as error:
             self._adapter._emit_parse_error(ctx, self._plan, error)
+
+
+class _SurfaceDiscoveryCommand(click.Command):
+    def __init__(
+        self,
+        *args: Any,
+        adapter: ClickAdapter,
+        path: tuple[str, ...],
+        **kwargs: Any,
+    ) -> None:
+        self._adapter = adapter
+        self._path = path
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        try:
+            return super().parse_args(ctx, args)
+        except click.ClickException as error:
+            self._adapter._emit_discovery_parse_error(ctx, self._path, error)
 
 
 def _render_parameters() -> list[click.Parameter]:

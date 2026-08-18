@@ -150,3 +150,23 @@ def test_discovery_yaml_never_uses_ellipsis_placeholders() -> None:
 
     assert result.exit_code == 0
     assert "..." not in result.stdout
+
+
+def test_discovery_missing_parameter_is_a_structured_error() -> None:
+    command = ClickAdapter(app_with_operations()).command()
+
+    result, document = invoke_json(command, ["operations", "describe"])
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "missing_parameter"
+    assert document["command"]["parsed"]["path"] == ["operations", "describe"]
+
+
+def test_unknown_discovery_command_is_a_structured_error() -> None:
+    command = ClickAdapter(app_with_operations()).command()
+
+    result, document = invoke_json(command, ["operations", "missing"])
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "unknown_command"
+    assert document["command"]["parsed"]["path"] == ["operations"]
