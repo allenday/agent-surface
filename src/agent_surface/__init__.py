@@ -14,6 +14,15 @@ from agent_surface.contracts import (
     SuccessEnvelope,
 )
 from agent_surface.operations import OperationError
+from agent_surface.references import (
+    DuplicateReferenceCodec,
+    InvalidReference,
+    MissingReferenceCodec,
+    ReferenceCodec,
+    ReferenceRegistry,
+    ReferenceValue,
+    encode_scalar,
+)
 from agent_surface.rendering import RenderOptions, render, render_envelope
 from agent_surface.skills import bundled_skill_path
 
@@ -23,16 +32,23 @@ __all__ = [
     "App",
     "BoundedCollection",
     "CommandView",
+    "DuplicateReferenceCodec",
     "ErrorEnvelope",
     "ErrorInfo",
+    "InvalidReference",
+    "MissingReferenceCodec",
     "OperationError",
     "OutputBudget",
     "OutputBudgetExceeded",
     "ParsedCommand",
+    "ReferenceCodec",
+    "ReferenceRegistry",
+    "ReferenceValue",
     "RenderOptions",
     "SuccessEnvelope",
     "__version__",
     "bundled_skill_path",
+    "encode_scalar",
     "render",
     "render_envelope",
 ]
