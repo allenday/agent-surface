@@ -436,6 +436,19 @@ class ClickAdapter:
                     document_format=_surface_format,
                     yaml_style=_surface_yaml_style,
                 )
+            except Exception:
+                self._emit_error(
+                    command,
+                    OperationError(
+                        "internal_error",
+                        "Action discovery failed unexpectedly",
+                        fix="Retry or inspect application diagnostics.",
+                    ),
+                    exit_code=70,
+                    operation="actions.list",
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
 
         @click.pass_context
         def explain_action(
@@ -450,7 +463,21 @@ class ClickAdapter:
                 ("actions", "explain"),
                 arguments={"operation": operation},
             )
-            action = self._action_provider.explain(operation)
+            try:
+                action = self._action_provider.explain(operation)
+            except Exception:
+                self._emit_error(
+                    command,
+                    OperationError(
+                        "internal_error",
+                        "Action discovery failed unexpectedly",
+                        fix="Retry or inspect application diagnostics.",
+                    ),
+                    exit_code=70,
+                    operation="actions.explain",
+                    document_format=_surface_format,
+                    yaml_style=_surface_yaml_style,
+                )
             if action is None:
                 self._emit_error(
                     command,
@@ -773,24 +800,41 @@ class ClickAdapter:
         document_format: str,
         yaml_style: str,
     ) -> typing.Never:
-        actions = self._action_provider.actions_for(
-            operation=operation,
-            error=error,
-        )
+        try:
+            actions = self._action_provider.actions_for(
+                operation=operation,
+                error=error,
+            )
+        except Exception:
+            actions = NoActions().actions_for(operation=operation, error=error)
         outcome = error_outcome(error, next_actions=actions)
         envelope = ErrorEnvelope(
-            command=_compact_command(command),
+            command=command,
             error=outcome.error,
             fix=outcome.fix,
             next_actions=outcome.next_actions,
         )
-        click.echo(
-            render_envelope(
-                envelope,
-                options=self._selected_render_options(document_format, yaml_style),
-            ),
-            nl=False,
-        )
+        options = self._selected_render_options(document_format, yaml_style)
+        try:
+            rendered = render(envelope, options=options)
+        except OutputBudgetExceeded as budget_error:
+            fallback = ErrorEnvelope(
+                command=_compact_command(
+                    command,
+                    max_items=options.budget.max_items,
+                ),
+                error=error_outcome(
+                    OperationError(
+                        budget_error.code,
+                        str(budget_error),
+                        details=(budget_error.details,),
+                        fix=budget_error.fix,
+                    )
+                ).error,
+                fix=budget_error.fix,
+            )
+            rendered = render_envelope(fallback, options=options)
+        click.echo(rendered, nl=False)
         raise click.exceptions.Exit(exit_code)
 
     def _emit_parse_error(
@@ -883,9 +927,21 @@ class ClickAdapter:
     @staticmethod
     def _redact_error(error: OperationError, plan: CliCommandPlan) -> OperationError:
         sensitive = {field.name for field in plan.fields if field.sensitive}
+
+        def redact(value: Any, key: str | None = None) -> Any:
+            if key in sensitive:
+                return _REDACTED
+            if isinstance(value, dict):
+                return {item_key: redact(item, str(item_key)) for item_key, item in value.items()}
+            if isinstance(value, tuple):
+                return tuple(redact(item) for item in value)
+            if isinstance(value, list):
+                return [redact(item) for item in value]
+            return value
+
         details = []
         for item in error.details:
-            copied = dict(item)
+            copied = redact(dict(item))
             location = tuple(copied.get("loc", ()))
             if location and location[0] in sensitive and "input" in copied:
                 copied["input"] = _REDACTED
@@ -1098,14 +1154,20 @@ def _render_choices_from_raw(raw: tuple[str, ...]) -> tuple[str, str]:
     return document_format, yaml_style
 
 
-def _compact_command(command: CommandView) -> CommandView:
+def _compact_command(command: CommandView, *, max_items: int = 20) -> CommandView:
     marker = "<value omitted: exceeds output budget>"
 
     def compact(value: Any) -> Any:
         if isinstance(value, str) and len(value.encode("utf-8")) > 256:
             return marker
         if isinstance(value, tuple):
+            if len(value) > max_items:
+                return (marker,)
             return tuple(compact(item) for item in value)
+        if isinstance(value, list):
+            if len(value) > max_items:
+                return [marker]
+            return [compact(item) for item in value]
         if isinstance(value, dict):
             return {key: compact(item) for key, item in value.items()}
         return value

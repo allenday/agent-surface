@@ -426,6 +426,85 @@ def test_sensitive_domain_error_details_are_redacted() -> None:
     assert document["error"]["details"][0]["value"] == "<redacted>"
 
 
+def test_sensitive_domain_error_mapping_is_recursively_redacted() -> None:
+    class Request(BaseModel):
+        token: str = Field(json_schema_extra={"sensitive": True})
+
+    app = App("vault")
+
+    @app.operation("tokens.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "token_rejected",
+            "Token rejected",
+            details=({"context": {"token": request.token}},),
+        )
+
+    result, _ = invoke_json(app, ["tokens", "inspect", "--token", "consumer-secret"])
+
+    assert result.exit_code == 4
+    assert "consumer-secret" not in result.output
+
+
+def test_error_command_is_compacted_only_after_budget_failure() -> None:
+    value = "x" * 300
+    class LongRequest(BaseModel):
+        text: str
+
+    long_app = App("long")
+
+    @long_app.operation("text.reject")
+    def reject_long(request: LongRequest) -> EchoResult:
+        raise OperationError("rejected", request.text)
+
+    result, document = invoke_json(long_app, ["text", "reject", "--text", value])
+
+    assert result.exit_code == 4
+    assert "<value omitted" not in result.output
+    assert value in document["command"]["raw"]
+
+    class Request(BaseModel):
+        tags: list[str]
+
+    app = App("tags")
+
+    @app.operation("tags.reject")
+    def reject(request: Request) -> EchoResult:
+        raise OperationError("rejected", value)
+
+    limited, limited_document = invoke_json(
+        app,
+        ["tags", "reject", *sum((["--tags", str(index)] for index in range(100)), [])],
+        render_options=RenderOptions(budget=OutputBudget(max_items=20)),
+    )
+
+    assert limited.exit_code == 4
+    assert limited_document["error"]["code"] == "item_budget_exceeded"
+
+
+def test_action_provider_failure_becomes_deny_by_default_internal_error() -> None:
+    class BrokenActions:
+        def actions_for(self, **kwargs: object) -> ActionCollection:
+            raise RuntimeError("provider private detail")
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            raise RuntimeError("provider private detail")
+
+        def explain(self, operation: str):
+            raise RuntimeError("provider private detail")
+
+    result, document = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "hello"],
+        action_provider=BrokenActions(),
+    )
+
+    assert result.exit_code == 70
+    assert document["error"]["code"] == "internal_error"
+    assert document["next_actions"]["items"] == []
+    assert "provider private detail" not in result.output
+
+
 def test_required_confirmation_field_uses_confirmation_exit() -> None:
     class Request(BaseModel):
         item: str

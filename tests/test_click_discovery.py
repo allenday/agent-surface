@@ -170,3 +170,23 @@ def test_unknown_discovery_command_is_a_structured_error() -> None:
     assert result.exit_code == 2
     assert document["error"]["code"] == "unknown_command"
     assert document["command"]["parsed"]["path"] == ["operations"]
+
+
+def test_action_discovery_provider_failure_is_structured_and_deny_by_default() -> None:
+    class BrokenActions(StaticActions):
+        def list_actions(
+            self,
+            *,
+            cursor: str | None = None,
+            budget: OutputBudget | None = None,
+        ) -> ActionCollection:
+            raise RuntimeError("provider private detail")
+
+    command = ClickAdapter(app_with_operations(), action_provider=BrokenActions()).command()
+
+    result, document = invoke_json(command, ["actions", "list"])
+
+    assert result.exit_code == 70
+    assert document["error"]["code"] == "internal_error"
+    assert document["next_actions"]["items"] == []
+    assert "provider private detail" not in result.output
