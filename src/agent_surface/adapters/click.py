@@ -758,7 +758,7 @@ class ClickAdapter:
             command,
             OperationError(
                 code,
-                error.format_message(),
+                _redact_text(error.format_message(), _sensitive_raw_values(raw, plan)),
                 fix=f"Run {self._app.name} operations describe {plan.operation}.",
             ),
             exit_code=2,
@@ -961,26 +961,68 @@ def _pagination_parameters() -> list[click.Parameter]:
 
 
 def _redact_raw(raw: tuple[str, ...], plan: CliCommandPlan) -> tuple[str, ...]:
-    sensitive_options = {
-        field.parameter_decls[0]
+    sensitive_values = frozenset(_sensitive_raw_values(raw, plan))
+    redacted = tuple(_REDACTED if token in sensitive_values else token for token in raw)
+    for field in plan.fields:
+        if not field.sensitive or field.kind != "option":
+            continue
+        option = field.parameter_decls[0]
+        redacted = tuple(
+            f"{option}={_REDACTED}" if token.startswith(f"{option}=") else token
+            for token in redacted
+        )
+    return redacted
+
+
+def _sensitive_raw_values(
+    raw: tuple[str, ...],
+    plan: CliCommandPlan,
+) -> tuple[str, ...]:
+    options = {
+        field.parameter_decls[0]: field
         for field in plan.fields
-        if field.sensitive and field.kind == "option"
+        if field.kind == "option"
     }
-    redacted = list(raw)
-    redact_next = False
-    for index, token in enumerate(redacted):
-        if redact_next:
-            redacted[index] = _REDACTED
-            redact_next = False
+    arguments = tuple(field for field in plan.fields if field.kind == "argument")
+    values: list[str] = []
+    argument_index = 0
+    index = min(1 + len(plan.path), len(raw))
+    positional_only = False
+    while index < len(raw):
+        token = raw[index]
+        if not positional_only and token == "--":
+            positional_only = True
+            index += 1
             continue
-        if token in sensitive_options:
-            redact_next = True
+        if not positional_only and token.startswith("--"):
+            name, separator, inline_value = token.partition("=")
+            field = options.get(name)
+            consumes_value = field is not None and field.value_kind != "boolean"
+            if field is not None and field.sensitive and consumes_value:
+                if separator:
+                    values.append(inline_value)
+                elif index + 1 < len(raw):
+                    values.append(raw[index + 1])
+            if not separator and (
+                consumes_value or name in {"--format", "--yaml-style"}
+            ):
+                index += 2
+            else:
+                index += 1
             continue
-        for option in sensitive_options:
-            if token.startswith(f"{option}="):
-                redacted[index] = f"{option}={_REDACTED}"
-                break
-    return tuple(redacted)
+        if argument_index < len(arguments):
+            field = arguments[argument_index]
+            if field.sensitive:
+                values.append(token)
+            argument_index += 1
+        index += 1
+    return tuple(value for value in values if value)
+
+
+def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
+    for secret in secrets:
+        value = value.replace(secret, _REDACTED)
+    return value
 
 
 def _render_choices_from_raw(raw: tuple[str, ...]) -> tuple[str, str]:

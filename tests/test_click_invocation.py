@@ -238,6 +238,45 @@ def test_sensitive_values_are_redacted_from_every_output_view() -> None:
     assert document["command"]["parsed"]["options"]["access_token"] == "<redacted>"
 
 
+def test_sensitive_positional_value_is_redacted_from_raw_argv() -> None:
+    class Request(BaseModel):
+        secret: str = Field(
+            json_schema_extra={"sensitive": True, "cli": {"kind": "argument"}}
+        )
+
+    app = App("vault")
+
+    @app.operation("secrets.check", read_only=True)
+    def check(request: Request) -> EchoResult:
+        return EchoResult(message="accepted")
+
+    result, document = invoke_json(app, ["secrets", "check", "consumer-secret"])
+
+    assert result.exit_code == 0
+    assert "consumer-secret" not in result.output
+    assert document["command"]["raw"][-3] == "<redacted>"
+
+
+def test_sensitive_bad_lexical_value_is_redacted_from_parse_error() -> None:
+    class Request(BaseModel):
+        pin: int = Field(json_schema_extra={"sensitive": True})
+
+    app = App("vault")
+
+    @app.operation("secrets.check", read_only=True)
+    def check(request: Request) -> EchoResult:
+        return EchoResult(message=str(request.pin))
+
+    result, document = invoke_json(
+        app,
+        ["secrets", "check", "--pin", "not-a-secret-pin"],
+    )
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "invalid_value"
+    assert "not-a-secret-pin" not in result.output
+
+
 def test_destructive_operation_requires_confirmation_before_handler_runs() -> None:
     class Request(BaseModel):
         item: str
