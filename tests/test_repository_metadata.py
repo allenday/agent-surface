@@ -1,7 +1,13 @@
 import tomllib
 from pathlib import Path
 
+from ruamel.yaml import YAML
+
 ROOT = Path(__file__).parents[1]
+
+
+def load_yaml(path: str) -> object:
+    return YAML(typ="safe").load(ROOT / path)
 
 
 def test_python_tooling_uses_the_declared_minimum_version() -> None:
@@ -76,3 +82,27 @@ def test_public_project_sidecars_exist() -> None:
         "Trusted Publisher",
     ):
         assert required in release_guide
+
+
+def test_github_contributor_templates_are_structured_and_parseable() -> None:
+    bug = load_yaml(".github/ISSUE_TEMPLATE/bug.yml")
+    feature = load_yaml(".github/ISSUE_TEMPLATE/feature.yml")
+    config = load_yaml(".github/ISSUE_TEMPLATE/config.yml")
+
+    assert bug["name"] == "Bug report"
+    assert {item.get("id") for item in bug["body"]} >= {"description", "reproduction"}
+    assert feature["name"] == "Feature request"
+    assert {item.get("id") for item in feature["body"]} >= {"problem", "proposal"}
+    assert config["blank_issues_enabled"] is False
+
+    pull_request = (ROOT / ".github/pull_request_template.md").read_text()
+    assert "make check" in pull_request
+    assert "Tests" in pull_request
+
+
+def test_dependabot_tracks_uv_and_actions_weekly() -> None:
+    dependabot = load_yaml(".github/dependabot.yml")
+    updates = dependabot["updates"]
+
+    assert {update["package-ecosystem"] for update in updates} == {"uv", "github-actions"}
+    assert all(update["schedule"]["interval"] == "weekly" for update in updates)
