@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
 
+from agent_surface import Action, BoundedCollection, OutputBudget, OutputBudgetExceeded
 from agent_surface.rendering import RenderOptions, render
 
 GOLDEN = Path(__file__).parent / "golden"
@@ -87,3 +88,58 @@ def test_json_is_explicit_deterministic_unicode_output() -> None:
     assert "βeta" in document
     assert document.index('"name"') < document.index('"profile"')
     assert json.loads(document) == expected_value()
+
+
+def test_render_rejects_unmarked_sequence_over_item_budget_at_precise_path() -> None:
+    options = RenderOptions(budget=OutputBudget(max_items=2))
+
+    with pytest.raises(OutputBudgetExceeded) as raised:
+        render({"result": {"items": ["one", "two", "three"]}}, options=options)
+
+    assert raised.value.code == "item_budget_exceeded"
+    assert raised.value.path == ("result", "items")
+    assert raised.value.details == {"returned": 3, "max_items": 2}
+
+
+def test_explicit_bounded_collection_renders_without_ellipsis_placeholder() -> None:
+    collection = BoundedCollection[str].from_sequence(
+        ("one", "two", "three"),
+        budget=OutputBudget(max_items=2),
+        continuation=Action(
+            rel="next-page",
+            command=("inventory", "list", "--cursor", "two"),
+        ),
+    )
+
+    document = render(collection, options=RenderOptions(budget=OutputBudget(max_items=2)))
+    parsed = load_yaml(document)
+
+    assert parsed["items"] == ["one", "two"]
+    assert parsed["total"] == 3
+    assert parsed["truncated"] is True
+    assert "..." not in document
+    assert "..." not in parsed["items"]
+
+
+def test_render_enforces_exact_utf8_byte_boundary() -> None:
+    value = {"message": "สวัสดี"}
+    unconstrained = render(value)
+    measured = len(unconstrained.encode("utf-8"))
+
+    exact = render(
+        value,
+        options=RenderOptions(budget=OutputBudget(max_bytes=measured)),
+    )
+    assert exact == unconstrained
+
+    with pytest.raises(OutputBudgetExceeded) as raised:
+        render(
+            value,
+            options=RenderOptions(budget=OutputBudget(max_bytes=measured - 1)),
+        )
+    assert raised.value.code == "response_too_large"
+    assert raised.value.path == ()
+    assert raised.value.details == {
+        "measured_bytes": measured,
+        "max_bytes": measured - 1,
+    }

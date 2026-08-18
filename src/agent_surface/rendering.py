@@ -10,7 +10,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import LiteralScalarString
 
-from agent_surface.budgets import OutputBudget
+from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
 from agent_surface.contracts import ContractModel
 
 DocumentFormat = Literal["yaml", "json"]
@@ -34,9 +34,46 @@ def render(value: Any, *, options: RenderOptions | None = None) -> str:
 
     selected = options or RenderOptions()
     normalized = _JSON_VALUE.dump_python(value, mode="json")
+    _validate_item_budget(normalized, selected.budget)
     if selected.format == "json":
-        return json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
-    return _render_yaml(normalized, selected.yaml_style)
+        document = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
+    else:
+        document = _render_yaml(normalized, selected.yaml_style)
+    _validate_byte_budget(document, selected.budget)
+    return document
+
+
+def _validate_item_budget(
+    value: Any,
+    budget: OutputBudget,
+    path: tuple[str | int, ...] = (),
+) -> None:
+    if _is_sequence(value):
+        if (not path or path[-1] == "items") and len(value) > budget.max_items:
+            raise OutputBudgetExceeded(
+                code="item_budget_exceeded",
+                message="Collection exceeds the item budget",
+                path=path,
+                details={"returned": len(value), "max_items": budget.max_items},
+                fix="Use a bounded collection with a continuation action.",
+            )
+        for index, item in enumerate(value):
+            _validate_item_budget(item, budget, (*path, index))
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _validate_item_budget(item, budget, (*path, str(key)))
+
+
+def _validate_byte_budget(document: str, budget: OutputBudget) -> None:
+    measured = len(document.encode("utf-8"))
+    if measured > budget.max_bytes:
+        raise OutputBudgetExceeded(
+            code="response_too_large",
+            message="Rendered response exceeds the byte budget",
+            details={"measured_bytes": measured, "max_bytes": budget.max_bytes},
+            fix="Retry with a lower item limit or a narrower detail level.",
+        )
 
 
 def _render_yaml(value: Any, style: YamlStyle) -> str:
