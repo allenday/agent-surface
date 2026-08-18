@@ -34,10 +34,10 @@ semantics.
 - `max_items: 20`
 - `max_bytes: 65_536`, measured after UTF-8 encoding
 
-`RenderOptions` selects `format` (`yaml` or `json`), YAML `style` (`auto`, `flow`, or `block`), and
-an `OutputBudget`. Auto-style thresholds remain library policy rather than public tuning knobs for
-the first release: a leaf collection is eligible for flow style when it has at most six entries,
-contains no multiline scalar, and its isolated YAML representation fits within 100 columns.
+`RenderOptions` selects `format` (`yaml` or `json`), `yaml_style` (`auto`, `flow`, or `block`), and an
+`OutputBudget`. Auto-style thresholds remain library policy rather than public tuning knobs for the
+first release: a leaf collection is eligible for flow style when it has at most six entries, contains
+no multiline scalar, and its isolated YAML representation fits within 100 columns.
 
 ### Explicit bounded collections
 
@@ -59,9 +59,10 @@ item validation recognizes both collection contracts but does not mutate them.
 ### Renderer
 
 `render(value, options=RenderOptions()) -> str` accepts Pydantic models and JSON-compatible Python
-values. It first converts models with `model_dump(mode="json")`, validates marked and unmarked
-collections against the item budget, and serializes deterministically. The low-level function raises
-`OutputBudgetExceeded` rather than returning partial data.
+values. It first validates marked and unmarked domain collections against the item budget, explicitly
+exempting structural argv, parser-path, flag, and action-command sequences on typed contracts. It then
+converts models to JSON-compatible values and serializes deterministically. The low-level function
+raises `OutputBudgetExceeded` rather than returning partial data.
 
 `render_envelope(envelope, options=RenderOptions()) -> str` is the adapter-ready entry point. If an
 item or byte budget is exceeded, it renders a compact `ErrorEnvelope` with the original command,
@@ -144,14 +145,9 @@ error:
   code: response_too_large
   message: Rendered response exceeds the byte budget
   details:
-    - {path: [result], code: byte_budget, value: {measured_bytes: 70211, max_bytes: 65536}}
+    - {path: [], code: response_too_large, value: {measured_bytes: 70211, max_bytes: 65536}}
 fix: Retry with a lower item limit or a narrower detail level.
-next_actions:
-  items:
-    - {rel: retry-smaller, command: [inventory, resource, list, --limit, "10"]}
-  total: 1
-  returned: 1
-  truncated: false
+next_actions: {items: [], total: 0, returned: 0, truncated: false}
 ```
 
 ## Testing

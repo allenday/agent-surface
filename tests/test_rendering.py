@@ -116,6 +116,44 @@ def test_render_rejects_unmarked_sequence_over_item_budget_at_precise_path() -> 
     assert raised.value.details == {"returned": 3, "max_items": 2}
 
 
+@pytest.mark.parametrize(
+    ("value", "expected_path"),
+    [
+        ({"result": ["one", "two", "three"]}, ("result",)),
+        (
+            {"result": {"records": ["one", "two", "three"]}},
+            ("result", "records"),
+        ),
+    ],
+)
+def test_render_budgets_nested_sequences_independent_of_field_name(
+    value: dict[str, object],
+    expected_path: tuple[str, ...],
+) -> None:
+    with pytest.raises(OutputBudgetExceeded) as raised:
+        render(value, options=RenderOptions(budget=OutputBudget(max_items=2)))
+
+    assert raised.value.code == "item_budget_exceeded"
+    assert raised.value.path == expected_path
+
+
+def test_typed_command_structure_does_not_consume_domain_item_budget() -> None:
+    envelope = SuccessEnvelope[str](
+        command=CommandView(
+            raw=("inventory", "resource", "inspect", "resource-1"),
+            parsed=ParsedCommand(
+                path=("resource", "inspect"),
+                flags=("verbose", "resolved"),
+            ),
+        ),
+        result="ok",
+    )
+
+    document = render(envelope, options=RenderOptions(budget=OutputBudget(max_items=1)))
+
+    assert load_yaml(document)["result"] == "ok"
+
+
 def test_explicit_bounded_collection_renders_without_ellipsis_placeholder() -> None:
     collection = BoundedCollection[str].from_sequence(
         ("one", "two", "three"),

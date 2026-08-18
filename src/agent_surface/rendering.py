@@ -5,17 +5,21 @@ from collections.abc import Mapping, Sequence
 from io import StringIO
 from typing import Any, Literal
 
-from pydantic import Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import LiteralScalarString
 
-from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
+from agent_surface.budgets import BoundedCollection, OutputBudget, OutputBudgetExceeded
 from agent_surface.contracts import (
+    Action,
+    ActionCollection,
+    CommandView,
     ContractModel,
     ErrorDetail,
     ErrorEnvelope,
     ErrorInfo,
+    ParsedCommand,
     SuccessEnvelope,
 )
 
@@ -39,8 +43,8 @@ def render(value: Any, *, options: RenderOptions | None = None) -> str:
     """Render one complete JSON-compatible value without mutating its semantics."""
 
     selected = options or RenderOptions()
+    _validate_item_budget(value, selected.budget)
     normalized = _JSON_VALUE.dump_python(value, mode="json")
-    _validate_item_budget(normalized, selected.budget)
     if selected.format == "json":
         document = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
     else:
@@ -86,21 +90,59 @@ def _validate_item_budget(
     budget: OutputBudget,
     path: tuple[str | int, ...] = (),
 ) -> None:
-    if _is_sequence(value):
-        if (not path or path[-1] == "items") and len(value) > budget.max_items:
-            raise OutputBudgetExceeded(
-                code="item_budget_exceeded",
-                message="Collection exceeds the item budget",
-                path=path,
-                details={"returned": len(value), "max_items": budget.max_items},
-                fix="Use a bounded collection with a continuation action.",
+    if isinstance(value, SuccessEnvelope):
+        _validate_item_budget(value.result, budget, (*path, "result"))
+        _validate_item_budget(value.next_actions, budget, (*path, "next_actions"))
+        return
+    if isinstance(value, ErrorEnvelope):
+        _validate_item_budget(value.error, budget, (*path, "error"))
+        _validate_item_budget(value.next_actions, budget, (*path, "next_actions"))
+        return
+    if isinstance(value, BoundedCollection):
+        _validate_sequence_budget(value.items, budget, (*path, "items"))
+        return
+    if isinstance(value, ActionCollection):
+        _validate_sequence_budget(value.items, budget, (*path, "items"))
+        return
+    if isinstance(value, ErrorInfo):
+        _validate_sequence_budget(value.details, budget, (*path, "details"))
+        return
+    if isinstance(value, ErrorDetail):
+        _validate_item_budget(value.value, budget, (*path, "value"))
+        return
+    if isinstance(value, (Action, CommandView, ParsedCommand)):
+        return
+    if isinstance(value, BaseModel):
+        for field_name in type(value).model_fields:
+            _validate_item_budget(
+                getattr(value, field_name),
+                budget,
+                (*path, field_name),
             )
-        for index, item in enumerate(value):
-            _validate_item_budget(item, budget, (*path, index))
+        return
+    if _is_sequence(value):
+        _validate_sequence_budget(value, budget, path)
         return
     if isinstance(value, Mapping):
         for key, item in value.items():
             _validate_item_budget(item, budget, (*path, str(key)))
+
+
+def _validate_sequence_budget(
+    value: Sequence[Any],
+    budget: OutputBudget,
+    path: tuple[str | int, ...],
+) -> None:
+    if len(value) > budget.max_items:
+        raise OutputBudgetExceeded(
+            code="item_budget_exceeded",
+            message="Collection exceeds the item budget",
+            path=path,
+            details={"returned": len(value), "max_items": budget.max_items},
+            fix="Use a bounded collection with a continuation action.",
+        )
+    for index, item in enumerate(value):
+        _validate_item_budget(item, budget, (*path, index))
 
 
 def _validate_byte_budget(document: str, budget: OutputBudget) -> None:
