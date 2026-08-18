@@ -4,6 +4,7 @@ from pathlib import Path
 import click
 from click.testing import CliRunner
 from pydantic import BaseModel, Field
+from ruamel.yaml import YAML
 
 from agent_surface import App
 from agent_surface.adapters.click import ClickAdapter, build_click_group
@@ -59,6 +60,32 @@ def test_generated_group_mounts_beneath_a_consumer_owned_group() -> None:
 
     assert result.exit_code == 0
     assert "Inspect one book" in result.output
+
+
+def test_mounted_group_uses_explicit_provider_for_original_outer_argv() -> None:
+    original = (
+        "root",
+        "--profile",
+        "prod",
+        "catalog",
+        "books",
+        "inspect",
+        "dune",
+    )
+    root = click.Group(
+        "root",
+        params=[click.Option(("--profile",), expose_value=False)],
+    )
+    root.add_command(
+        ClickAdapter(app(), argv_provider=lambda: original).command(),
+        name="catalog",
+    )
+
+    result = CliRunner().invoke(root, list(original[1:]))
+    document = YAML(typ="safe").load(result.stdout)
+
+    assert result.exit_code == 0
+    assert tuple(document["command"]["raw"]) == original
 
 
 def test_generated_click_parameter_shapes_match_the_compiled_plan() -> None:

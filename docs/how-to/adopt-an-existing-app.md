@@ -22,3 +22,19 @@ For a working integration, see [`examples/bookstore.py`](../../examples/bookstor
 architectural contract and staged migration details, read the original
 [adoption boundary](../adoption.md).
 
+## Mount beneath an existing Click root
+
+Pass an argv provider when the outer root has its own options and exact outer argv must appear in
+the envelope:
+
+```python
+import sys
+
+root.add_command(
+    build_click_group(app, argv_provider=lambda: tuple(sys.argv)),
+    name="agent",
+)
+```
+
+Without a provider, a standalone generated group captures its own `prog_name` and arguments. The
+provider is the lossless boundary for a consumer-owned parent that Click has already parsed.

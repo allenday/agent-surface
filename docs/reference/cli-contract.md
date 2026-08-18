@@ -22,7 +22,9 @@ next_actions: {items: [], total: 0, returned: 0, truncated: false}
 ```
 
 `command.raw` preserves argv boundaries. Sensitive values are replaced with `<redacted>`. The
-parsed view stays shallow and close to parser truth.
+parsed view stays shallow and close to parser truth. For a generated group mounted beneath a
+consumer-owned Click root, supply `argv_provider` to preserve parent options that Click consumed
+before dispatching into the group.
 
 ## Exit codes
 
@@ -44,4 +46,3 @@ machine-readable discovery. Listings are cursor-paginated. Human-oriented Click 
 available.
 
 See the [bookstore tutorial](../tutorials/bookstore.md) for an executable interaction.
-

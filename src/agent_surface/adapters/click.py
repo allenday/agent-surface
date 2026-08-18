@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import types
 import typing
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -255,11 +256,13 @@ class ClickAdapter:
         references: ReferenceRegistry | None = None,
         action_provider: ActionProvider | None = None,
         render_options: RenderOptions | None = None,
+        argv_provider: Callable[[], Sequence[str]] | None = None,
     ) -> None:
         self._app = app
         self._references = references or ReferenceRegistry()
         self._action_provider = action_provider or NoActions()
         self._render_options = render_options or RenderOptions()
+        self._argv_provider = argv_provider
         self._plans = CliPlanCompiler(
             app.operations,
             references=self._references,
@@ -292,6 +295,11 @@ class ClickAdapter:
             parent.add_command(self._leaf_command(plan))
         self._add_discovery(root)
         return root
+
+    def _capture_raw(self, info_name: str | None, args: list[str]) -> tuple[str, ...]:
+        if self._argv_provider is not None:
+            return tuple(self._argv_provider())
+        return (info_name or self._app.name, *tuple(args))
 
     def _add_discovery(self, root: click.Group) -> None:
         operations = _SurfaceGroup(
@@ -849,12 +857,14 @@ def build_click_group(
     references: ReferenceRegistry | None = None,
     action_provider: ActionProvider | None = None,
     render_options: RenderOptions | None = None,
+    argv_provider: Callable[[], Sequence[str]] | None = None,
 ) -> click.Group:
     return ClickAdapter(
         app,
         references=references,
         action_provider=action_provider,
         render_options=render_options,
+        argv_provider=argv_provider,
     ).command()
 
 
@@ -877,7 +887,7 @@ class _SurfaceGroup(click.Group):
         parent: click.Context | None = None,
         **extra: Any,
     ) -> click.Context:
-        raw = (info_name or self.name or "agent-surface", *tuple(args))
+        raw = self._adapter._capture_raw(info_name, args)
         context = super().make_context(info_name, args, parent=parent, **extra)
         context.meta.setdefault(_RAW_ARGV_KEY, raw)
         return context
