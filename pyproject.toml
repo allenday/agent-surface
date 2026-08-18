@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -13,7 +13,7 @@ authors = [{ name = "Allen Day" }]
 dependencies = [
   "click>=8.1,<9",
   "pydantic>=2.11,<3",
-  "ruamel.yaml>=0.18,<0.19",
+  "ruamel.yaml>=0.19.1,<0.20",
 ]
 
 [project.urls]
@@ -21,7 +21,7 @@ Repository = "https://github.com/allenday/agent-surface"
 Issues = "https://github.com/allenday/agent-surface/issues"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.28,<2"]
+mcp = ["mcp>=2.0.0,<3"]
 
 [dependency-groups]
 dev = [
