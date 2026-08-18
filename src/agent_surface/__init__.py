@@ -2,6 +2,13 @@
 
 __version__ = "0.1.0"
 
+from agent_surface.actions import (
+    ActionCandidate,
+    ActionCompiler,
+    ActionDefinitionError,
+    ActionSlotPlan,
+    action,
+)
 from agent_surface.app import App
 from agent_surface.budgets import BoundedCollection, OutputBudget, OutputBudgetExceeded
 from agent_surface.contracts import (
@@ -28,7 +35,11 @@ from agent_surface.skills import bundled_skill_path
 
 __all__ = [
     "Action",
+    "ActionCandidate",
     "ActionCollection",
+    "ActionCompiler",
+    "ActionDefinitionError",
+    "ActionSlotPlan",
     "App",
     "BoundedCollection",
     "CommandView",
@@ -47,6 +58,7 @@ __all__ = [
     "RenderOptions",
     "SuccessEnvelope",
     "__version__",
+    "action",
     "bundled_skill_path",
     "encode_scalar",
     "render",
