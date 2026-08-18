@@ -45,4 +45,3 @@ def test_no_actions_is_an_explicit_empty_provider() -> None:
     actions = NoActions().actions_for(operation="resource.inspect", result=Result(status="ready"))
 
     assert actions == ActionCollection()
-

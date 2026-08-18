@@ -27,4 +27,3 @@ be introspected narrowly, but an explicit policy such as `AllowActions` decides 
 
 See [HATEOAS and bounded discovery](../concepts/hateoas.md) for the reasoning and the
 [Python API reference](../reference/python-api.md) for the primary types.
-

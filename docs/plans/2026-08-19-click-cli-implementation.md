@@ -178,4 +178,3 @@ errors and bounded actions; Click owns argv capture, lexical parsing, rendering,
 5. Fast-forward `main`, rerun `make check`, push, and watch Python 3.12–3.14 plus distribution CI.
 6. Close issue #5 only after CI succeeds, linking the run.
 7. Remove the merged worktree and feature branch.
-

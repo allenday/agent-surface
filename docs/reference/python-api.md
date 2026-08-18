@@ -28,4 +28,3 @@ projections; handlers never import Click or MCP.
 The package is pre-1.0. Prefer an internal integration module so consumer code owns its domain types
 and the projection can evolve without leaking library types throughout the application. See
 [adopting an existing app](../how-to/adopt-an-existing-app.md).
-

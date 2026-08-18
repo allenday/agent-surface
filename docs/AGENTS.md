@@ -8,4 +8,3 @@ These instructions extend the repository-root `AGENTS.md` for `docs/`.
 - Explain HATEOAS in plain language before relying on the acronym.
 - Never claim shipped behavior without verifying it against code and tests.
 - Keep internal Markdown links relative and resolvable.
-

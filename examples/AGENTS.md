@@ -7,4 +7,3 @@ These instructions extend the repository-root `AGENTS.md` for `examples/`.
 - Demonstrate a complete HATEOAS trajectory, stable references, bounded actions, and confirmed writes.
 - Keep commands and output in the README synchronized with actual execution.
 - Favor a small readable domain over framework feature coverage.
-

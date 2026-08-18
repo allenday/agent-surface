@@ -192,4 +192,3 @@ budgets. The reference consumer must execute through Click without importing Cli
 module or adding transport-specific business logic.
 
 The bookstore documentation example is executable and uses the real generated adapter.
-

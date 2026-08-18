@@ -35,4 +35,3 @@ without breaking a saved action.
 
 Continue with the [bookstore trajectory](../tutorials/bookstore.md) or the
 [references and actions guide](../how-to/references-and-actions.md).
-

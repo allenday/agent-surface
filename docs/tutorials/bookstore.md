@@ -56,4 +56,3 @@ The generated CLI includes machine-readable discovery:
 Normal `--help` remains useful to humans. Discovery commands provide schemas, pagination, and stable
 structured envelopes to agents. See the [CLI contract](../reference/cli-contract.md) for the exact
 rules.
-
