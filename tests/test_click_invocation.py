@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import pytest
 from click.testing import CliRunner
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from agent_surface import (
     ActionCollection,
@@ -437,7 +437,7 @@ def test_sensitive_domain_error_mapping_is_recursively_redacted() -> None:
         raise OperationError(
             "token_rejected",
             "Token rejected",
-            details=({"context": {"token": request.token}},),
+            details=({"context": {"provided": request.token}},),
         )
 
     result, _ = invoke_json(app, ["tokens", "inspect", "--token", "consumer-secret"])
@@ -480,6 +480,32 @@ def test_error_command_is_compacted_only_after_budget_failure() -> None:
 
     assert limited.exit_code == 4
     assert limited_document["error"]["code"] == "item_budget_exceeded"
+
+
+def test_error_fallback_bounds_high_cardinality_parsed_mapping() -> None:
+    request_model = create_model(
+        "WideRequest",
+        **{f"field_{index}": (str, ...) for index in range(100)},
+    )
+    app = App("wide")
+
+    def reject(request):
+        raise OperationError("rejected", "Rejected")
+
+    reject.__annotations__ = {"request": request_model, "return": EchoResult}
+    app.operations.register("wide.reject", reject)
+    arguments = ["wide", "reject"]
+    for index in range(100):
+        arguments.extend((f"--field-{index}", str(index)))
+
+    result, document = invoke_json(
+        app,
+        arguments,
+        render_options=RenderOptions(budget=OutputBudget(max_bytes=1_024)),
+    )
+
+    assert result.exit_code == 4
+    assert document["error"]["code"] == "response_too_large"
 
 
 def test_action_provider_failure_becomes_deny_by_default_internal_error() -> None:

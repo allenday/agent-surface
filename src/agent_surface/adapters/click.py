@@ -693,7 +693,11 @@ class ClickAdapter:
         except OperationInputError as error:
             self._emit_error(
                 command,
-                self._redact_error(error, plan),
+                self._redact_error(
+                    error,
+                    plan,
+                    raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
+                ),
                 exit_code=2,
                 operation=plan.operation,
                 document_format=document_format,
@@ -711,7 +715,11 @@ class ClickAdapter:
         except OperationError as error:
             self._emit_error(
                 command,
-                self._redact_error(error, plan),
+                self._redact_error(
+                    error,
+                    plan,
+                    raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
+                ),
                 exit_code=4,
                 operation=plan.operation,
                 document_format=document_format,
@@ -833,7 +841,32 @@ class ClickAdapter:
                 ).error,
                 fix=budget_error.fix,
             )
-            rendered = render_envelope(fallback, options=options)
+            try:
+                rendered = render_envelope(fallback, options=options)
+            except OutputBudgetExceeded:
+                emergency = ErrorEnvelope(
+                    command=CommandView(
+                        raw=(self._app.name,),
+                        parsed=ParsedCommand(path=()),
+                    ),
+                    error=error_outcome(
+                        OperationError(
+                            budget_error.code,
+                            str(budget_error),
+                            fix=budget_error.fix,
+                        )
+                    ).error,
+                    fix=budget_error.fix,
+                )
+                emergency_options = options.model_copy(
+                    update={
+                        "budget": OutputBudget(
+                            max_items=max(20, options.budget.max_items),
+                            max_bytes=max(4_096, options.budget.max_bytes),
+                        )
+                    }
+                )
+                rendered = render(emergency, options=emergency_options)
         click.echo(rendered, nl=False)
         raise click.exceptions.Exit(exit_code)
 
@@ -925,8 +958,14 @@ class ClickAdapter:
         )
 
     @staticmethod
-    def _redact_error(error: OperationError, plan: CliCommandPlan) -> OperationError:
+    def _redact_error(
+        error: OperationError,
+        plan: CliCommandPlan,
+        *,
+        raw: tuple[str, ...],
+    ) -> OperationError:
         sensitive = {field.name for field in plan.fields if field.sensitive}
+        secrets = _sensitive_raw_values(raw, plan)
 
         def redact(value: Any, key: str | None = None) -> Any:
             if key in sensitive:
@@ -937,6 +976,8 @@ class ClickAdapter:
                 return tuple(redact(item) for item in value)
             if isinstance(value, list):
                 return [redact(item) for item in value]
+            if isinstance(value, str):
+                return _redact_text(value, secrets)
             return value
 
         details = []
@@ -948,9 +989,9 @@ class ClickAdapter:
             details.append(copied)
         return OperationError(
             error.code,
-            error.message,
+            _redact_text(error.message, secrets),
             details=tuple(details),
-            fix=error.fix,
+            fix=_redact_text(error.fix, secrets) if error.fix is not None else None,
             retryable=error.retryable,
         )
 
@@ -1169,6 +1210,8 @@ def _compact_command(command: CommandView, *, max_items: int = 20) -> CommandVie
                 return [marker]
             return [compact(item) for item in value]
         if isinstance(value, dict):
+            if len(value) > max_items:
+                return {"_omitted": marker}
             return {key: compact(item) for key, item in value.items()}
         return value
 
