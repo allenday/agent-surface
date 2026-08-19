@@ -148,7 +148,11 @@ class MCPAdapter:
             return self._mcp_result(success_outcome(result, next_actions=actions), is_error=False)
         except ReferenceError as error:
             return self._error_result(
-                OperationError(error.code, str(error), fix=error.fix),
+                self._redact_error(
+                    OperationError(error.code, str(error), fix=error.fix),
+                    definition,
+                    params.arguments or {},
+                ),
                 operation=definition.name,
             )
         except OperationError as error:

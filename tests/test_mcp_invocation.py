@@ -177,6 +177,49 @@ async def test_reference_codec_failure_is_a_stable_invalid_reference() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sensitive_reference_token_is_redacted_from_reference_errors() -> None:
+    @dataclass(frozen=True)
+    class BookRef:
+        value: str
+
+    class UnstableCodec:
+        kind = "book"
+        python_type = BookRef
+
+        def encode(self, value: BookRef) -> str:
+            return value.value
+
+        def decode(self, token: str) -> BookRef:
+            return BookRef(f"changed-{token}")
+
+        def display(self, value: BookRef) -> str:
+            return value.value
+
+    class Request(BaseModel):
+        book: BookRef = Field(json_schema_extra={"sensitive": True})
+
+    app = App("books")
+
+    @app.operation("books.inspect")
+    def inspect(request: Request) -> EchoResult:
+        return EchoResult(message=request.book.value)
+
+    references = ReferenceRegistry()
+    references.register(UnstableCodec())
+    adapter = MCPAdapter(app, references=references)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool(
+            "books.inspect", {"book": "consumer-secret"}
+        )
+
+    assert result.is_error is True
+    assert result.structured_content["error"]["code"] == "invalid_reference"
+    assert "consumer-secret" not in result.content[0].text
+    assert "consumer-secret" not in str(result.structured_content)
+
+
+@pytest.mark.asyncio
 async def test_sensitive_domain_details_are_recursively_redacted() -> None:
     class Request(BaseModel):
         token: str = Field(json_schema_extra={"sensitive": True})
