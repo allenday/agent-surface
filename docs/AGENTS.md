@@ -8,3 +8,7 @@ These instructions extend the repository-root `AGENTS.md` for `docs/`.
 - Explain HATEOAS in plain language before relying on the acronym.
 - Never claim shipped behavior without verifying it against code and tests.
 - Keep internal Markdown links relative and resolvable.
+- Keep CLI and MCP examples semantically aligned: CLI actions follow `command`; MCP actions follow
+  `operation` plus `bound` arguments.
+- Document MCP wire names such as `structuredContent` and `nextCursor` separately from Python SDK
+  attributes such as `structured_content` and `next_cursor`.

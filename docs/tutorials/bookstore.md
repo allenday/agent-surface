@@ -56,3 +56,46 @@ The generated CLI includes machine-readable discovery:
 Normal `--help` remains useful to humans. Discovery commands provide schemas, pagination, and stable
 structured envelopes to agents. See the [CLI contract](../reference/cli-contract.md) for the exact
 rules.
+
+## Follow the same trajectory through MCP
+
+Install the optional transport dependency with `pip install 'agent-surface[mcp]'`. The example's
+`surface.mcp()` method projects the same registry, reference codec, and action provider as the CLI:
+
+```python
+import asyncio
+
+from mcp import Client
+
+from examples.bookstore import build_surface
+
+
+async def main() -> None:
+    surface = build_surface()
+    async with Client(surface.mcp().server, raise_exceptions=True) as client:
+        searched = await client.call_tool("books.search", {"query": "dune", "limit": 2})
+        inspect = next(
+            item
+            for item in searched.structured_content["next_actions"]["items"]
+            if item["rel"] == "inspect"
+        )
+        inspected = await client.call_tool(inspect["operation"], inspect["bound"])
+        reserve = next(
+            item
+            for item in inspected.structured_content["next_actions"]["items"]
+            if item["rel"] == "reserve"
+        )
+        held = await client.call_tool(reserve["operation"], reserve["bound"])
+        assert held.structured_content["result"]["status"] == "active"
+
+
+asyncio.run(main())
+```
+
+The CLI follows each action's `command`; MCP follows the same action's `operation` and `bound`
+arguments. `bound` includes `confirm: true` for the advertised reservation, while the MCP adapter
+still independently enforces confirmation before invoking the handler. The in-memory client above
+is useful for integration tests. Production processes can call `await surface.mcp().run_stdio()` or
+mount `surface.mcp().streamable_http_app()`.
+
+See the [MCP contract](../reference/mcp-contract.md) for schemas, errors, discovery, and transports.

@@ -78,6 +78,32 @@ def test_readme_teaches_a_complete_hateoas_trajectory() -> None:
         assert required in normalized
 
 
+def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:
+    readme = (ROOT / "README.md").read_text()
+    tutorial = (ROOT / "docs" / "tutorials" / "bookstore.md").read_text()
+    python_api = (ROOT / "docs" / "reference" / "python-api.md").read_text()
+    mcp_contract = ROOT / "docs" / "reference" / "mcp-contract.md"
+
+    assert "pip install 'agent-surface[mcp]'" in readme
+    assert "MCPAdapter" in readme
+    assert "docs/reference/mcp-contract.md" in readme
+    assert "native MCP v2 and schema adapters are next" not in readme
+    assert "operation" in tutorial and "bound" in tutorial
+    assert "MCPAdapter" in python_api
+    assert mcp_contract.is_file()
+    contract = mcp_contract.read_text()
+    for required in (
+        "stdio",
+        "Streamable HTTP",
+        "structuredContent",
+        "nextCursor",
+        "confirmation",
+        "annotations",
+        "Click",
+    ):
+        assert required in contract
+
+
 def test_critical_directories_have_scoped_agent_instructions() -> None:
     for path in (
         "src/agent_surface/AGENTS.md",

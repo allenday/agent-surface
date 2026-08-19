@@ -1,4 +1,4 @@
-"""A complete HATEOAS bookstore projected through the generated Click adapter."""
+"""A complete HATEOAS bookstore projected through sibling Click and MCP adapters."""
 
 from dataclasses import dataclass
 
@@ -216,6 +216,7 @@ class BookstoreActions:
                             "--book",
                             result.items[0].ref.value,
                         ),
+                        bound={"book": result.items[0].ref.value},
                     )
                 )
             if result.next_cursor is not None:
@@ -235,6 +236,11 @@ class BookstoreActions:
                             "--limit",
                             "2",
                         ),
+                        bound={
+                            "query": result.query,
+                            "cursor": result.next_cursor,
+                            "limit": 2,
+                        },
                     )
                 )
         elif operation == "books.inspect" and isinstance(result, BookDetail):
@@ -251,6 +257,7 @@ class BookstoreActions:
                         result.ref.value,
                         "--confirm",
                     ),
+                    bound={"book": result.ref.value, "confirm": True},
                 )
             )
         elif operation == "holds.create" and isinstance(result, Hold):
@@ -266,6 +273,7 @@ class BookstoreActions:
                             "--book",
                             result.book.value,
                         ),
+                        bound={"book": result.book.value},
                     ),
                     Action(
                         rel="cancel",
@@ -278,6 +286,7 @@ class BookstoreActions:
                             result.id,
                             "--confirm",
                         ),
+                        bound={"hold": result.id, "confirm": True},
                     ),
                 )
             )
@@ -311,6 +320,15 @@ class BookstoreSurface:
 
     def cli(self):
         return build_click_group(
+            self.app,
+            references=self.references,
+            action_provider=self.actions,
+        )
+
+    def mcp(self):
+        from agent_surface.adapters.mcp import MCPAdapter
+
+        return MCPAdapter(
             self.app,
             references=self.references,
             action_provider=self.actions,

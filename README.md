@@ -5,16 +5,15 @@
 [![Python](https://img.shields.io/pypi/pyversions/agent-surface.svg)](https://pypi.org/project/agent-surface/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Define a typed Python operation once. Invoke it directly, project it as a YAML-first Click CLI, and
-publish bounded instructions for what an agent can validly do next.
+Define a typed Python operation once. Invoke it directly, project it as a YAML-first Click CLI or
+native MCP server, and publish bounded instructions for what an agent can validly do next.
 
 `agent-surface` is agent-first and developer-friendly: Pydantic remains the source of truth, output
 is compact and inspectable, errors explain how to recover, and no adapter contains business logic.
 
 > [!NOTE]
 > Typed operations, adaptive YAML/JSON rendering, references, bounded actions, and generated Click
-> CLIs work today. The native MCP v2 and schema adapters are next; the public API may change before
-> 1.0.
+> CLIs and MCP v2 servers work today. The public API may change before 1.0.
 
 ## Five-minute bookstore
 
@@ -35,6 +34,7 @@ For use in your own project:
 
 ```bash
 pip install agent-surface
+pip install 'agent-surface[mcp]'
 ```
 
 ## A trajectory through application state
@@ -82,7 +82,7 @@ next_actions:
     description: Inspect the first returned book
     command: [./examples/bookstore, books, inspect, --book, book_dune]
     operation: books.inspect
-    bound: {}
+    bound: {book: book_dune}
     slots: {}
   - rel: next-page
     description: Continue this search
@@ -97,7 +97,7 @@ next_actions:
     - --limit
     - '2'
     operation: books.search
-    bound: {}
+    bound: {query: dune, cursor: book_dune_messiah, limit: 2}
     slots: {}
   total: 2
   returned: 2
@@ -132,7 +132,7 @@ next_actions:
     description: Reserve this available book
     command: [./examples/bookstore, holds, create, --book, book_dune, --confirm]
     operation: holds.create
-    bound: {}
+    bound: {book: book_dune, confirm: true}
     slots: {}
   total: 1
   returned: 1
@@ -166,13 +166,13 @@ next_actions:
     description: ''
     command: [./examples/bookstore, books, inspect, --book, book_dune]
     operation: books.inspect
-    bound: {}
+    bound: {book: book_dune}
     slots: {}
   - rel: cancel
     description: ''
     command: [./examples/bookstore, holds, cancel, --hold, hold_book_dune, --confirm]
     operation: holds.cancel
-    bound: {}
+    bound: {hold: hold_book_dune, confirm: true}
     slots: {}
   total: 2
   returned: 2
@@ -219,6 +219,27 @@ the same request model, handler, result model, and stable `OperationError` seman
 [Python API guide](docs/reference/python-api.md), [CLI contract](docs/reference/cli-contract.md), or
 [existing-application adoption guide](docs/how-to/adopt-an-existing-app.md).
 
+## Project the same registry through MCP
+
+MCP is a sibling adapter, not a wrapper around Click:
+
+```python
+from agent_surface.adapters.mcp import MCPAdapter
+
+mcp = MCPAdapter(app)
+```
+
+`mcp.server` is the native low-level MCP server for embedding and tests. Run it over stdio with
+`await mcp.run_stdio()`, or obtain its ASGI application with `mcp.streamable_http_app()`. Tools keep
+their exact dotted operation names, Pydantic schemas, safety annotations, structured outcomes, and
+bounded discovery cursors. Pass the same `references=` and `action_provider=` integrations used by
+Click when your operations use stable object references or advertise next actions.
+
+In MCP responses, an advertised action's `operation` and `bound` fields are the next tool name and
+arguments. The complete search → inspect → reserve journey is executable in the
+[bookstore tutorial](docs/tutorials/bookstore.md); protocol details are in the
+[MCP contract](docs/reference/mcp-contract.md).
+
 ## Bounded output by construction
 
 YAML with adaptive flow style is the default. Small leaf collections stay on one line; larger and
@@ -254,7 +275,8 @@ See [references and actions](docs/how-to/references-and-actions.md).
 - Adopt incrementally: [existing application guide](docs/how-to/adopt-an-existing-app.md) and the
   original [adoption boundary](docs/adoption.md)
 - Integrate precisely: [Python API](docs/reference/python-api.md) and
-  [CLI envelope, discovery, and exits](docs/reference/cli-contract.md)
+  [CLI envelope, discovery, and exits](docs/reference/cli-contract.md), or the
+  [MCP contract](docs/reference/mcp-contract.md)
 - Contribute or release: [CONTRIBUTING.md](CONTRIBUTING.md) and
   [release guide](docs/releasing.md)
 

@@ -1,7 +1,9 @@
 import asyncio
 import json
 
+import pytest
 from click.testing import CliRunner
+from mcp import Client
 
 from examples.bookstore import SearchRequest, build_surface
 
@@ -53,3 +55,35 @@ def test_bookstore_domain_is_transport_independent() -> None:
     surface = build_surface()
 
     assert surface.store.__class__.__module__ == "examples.bookstore"
+
+
+@pytest.mark.asyncio
+async def test_bookstore_mcp_follows_operation_and_bound_values_through_state() -> None:
+    surface = build_surface()
+
+    async with Client(surface.mcp().server, raise_exceptions=True) as client:
+        searched = await client.call_tool("books.search", {"query": "dune", "limit": 2})
+        inspect_action = next(
+            action
+            for action in searched.structured_content["next_actions"]["items"]
+            if action["rel"] == "inspect"
+        )
+        inspected = await client.call_tool(
+            inspect_action["operation"], inspect_action["bound"]
+        )
+        reserve_action = next(
+            action
+            for action in inspected.structured_content["next_actions"]["items"]
+            if action["rel"] == "reserve"
+        )
+        reserved = await client.call_tool(
+            reserve_action["operation"], reserve_action["bound"]
+        )
+
+    assert searched.structured_content["result"]["returned"] == 2
+    assert inspected.structured_content["result"]["title"] == "Dune"
+    assert reserved.structured_content["result"] == {
+        "id": "hold_book_dune",
+        "book": {"value": "book_dune"},
+        "status": "active",
+    }
