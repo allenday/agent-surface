@@ -104,6 +104,32 @@ def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:
         assert required in contract
 
 
+def test_bookstore_docs_cover_persistent_crud_and_local_mcp_clients() -> None:
+    readme = (ROOT / "README.md").read_text()
+    tutorial = (ROOT / "docs" / "tutorials" / "bookstore.md").read_text()
+
+    assert (ROOT / "examples" / "bookstore-mcp").stat().st_mode & 0o111
+    for required in (
+        "examples/bookstore-mcp",
+        "AGENT_SURFACE_BOOKSTORE_DB",
+        "holds.get",
+        "holds.cancel",
+        "holds.delete",
+    ):
+        assert required in readme
+    for required in (
+        "[mcp_servers.bookstore]",
+        "codex mcp add bookstore",
+        "claude mcp add --transport stdio --scope user",
+        '"mcpServers"',
+        "sqlite3",
+        "standard library",
+        "https://developers.openai.com/codex/mcp",
+        "https://code.claude.com/docs/en/mcp",
+    ):
+        assert required in tutorial
+
+
 def test_critical_directories_have_scoped_agent_instructions() -> None:
     for path in (
         "src/agent_surface/AGENTS.md",

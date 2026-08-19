@@ -13,6 +13,16 @@ uv sync --frozen --all-extras --dev
 ./examples/bookstore books search --query dune --limit 2
 ```
 
+The example stores holds in SQLite. Python 3.12's `sqlite3` standard library module provides the
+driver, so there is no additional pip or uv dependency. (A custom Python build that omits SQLite is
+not supported.) By default the CLI uses `$XDG_DATA_HOME/agent-surface/bookstore.sqlite3`, falling
+back to `~/.local/share/agent-surface/bookstore.sqlite3`. Set an explicit path when you want CLI and
+MCP processes to share a known store:
+
+```bash
+export AGENT_SURFACE_BOOKSTORE_DB="$HOME/.local/share/agent-surface/bookstore.sqlite3"
+```
+
 The YAML response contains the matching books and a bounded `next_actions` collection. Follow the
 returned `inspect` command verbatim:
 
@@ -27,8 +37,16 @@ and confirmation-gated:
 ./examples/bookstore holds create --book book_dune --confirm
 ```
 
-The resulting hold advertises the next valid transitions, such as inspecting its book or cancelling
-the hold. The caller never needs to invent a route, stringify a Python object, or load the entire
+The resulting hold advertises the complete toy CRUD lifecycle:
+
+```bash
+./examples/bookstore holds get --hold hold_book_dune
+./examples/bookstore holds cancel --hold hold_book_dune --confirm
+./examples/bookstore holds delete --hold hold_book_dune --confirm
+```
+
+Cancellation is an update: the row remains readable with `status: cancelled`. Deletion physically
+removes it. The caller never needs to invent a route, stringify a Python object, or load the entire
 application graph.
 
 ## Read the integration boundary
@@ -99,3 +117,56 @@ is useful for integration tests. Production processes can call `await surface.mc
 mount `surface.mcp().streamable_http_app()`.
 
 See the [MCP contract](../reference/mcp-contract.md) for schemas, errors, discovery, and transports.
+
+## Connect Codex and Claude Code
+
+The repository includes [`examples/bookstore-mcp`](../../examples/bookstore-mcp), an executable
+stdio entry point that uses the repository's `.venv`. Use absolute paths in client configuration so
+the server does not depend on the client's working directory. First run `uv sync --all-extras
+--dev`, then register it with Codex:
+
+```bash
+codex mcp add bookstore --env AGENT_SURFACE_BOOKSTORE_DB=/absolute/path/to/bookstore.sqlite3 -- /absolute/path/to/agent-surface/examples/bookstore-mcp
+codex mcp list
+```
+
+The equivalent entry in `~/.codex/config.toml` is:
+
+```toml
+[mcp_servers.bookstore]
+command = "/absolute/path/to/agent-surface/examples/bookstore-mcp"
+
+[mcp_servers.bookstore.env]
+AGENT_SURFACE_BOOKSTORE_DB = "/absolute/path/to/bookstore.sqlite3"
+```
+
+Restart Codex after changing its configuration, then use `/mcp` to inspect the connection. See the
+[official Codex MCP configuration](https://developers.openai.com/codex/mcp) for project-local
+configuration, timeouts, and approval settings.
+
+For a user-scoped Claude Code server:
+
+```bash
+claude mcp add --transport stdio --scope user --env AGENT_SURFACE_BOOKSTORE_DB=/absolute/path/to/bookstore.sqlite3 bookstore -- /absolute/path/to/agent-surface/examples/bookstore-mcp
+claude mcp list
+```
+
+Or commit a project-scoped `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "bookstore": {
+      "command": "/absolute/path/to/agent-surface/examples/bookstore-mcp",
+      "env": {
+        "AGENT_SURFACE_BOOKSTORE_DB": "/absolute/path/to/bookstore.sqlite3"
+      }
+    }
+  }
+}
+```
+
+Use `/mcp` in Claude Code to inspect or authenticate configured servers. See the
+[official Claude Code MCP guide](https://code.claude.com/docs/en/mcp) for scope and transport
+details. Both clients invoke the same dotted tools and persist holds in the same database when they
+share `AGENT_SURFACE_BOOKSTORE_DB`.

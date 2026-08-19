@@ -28,7 +28,9 @@ uv sync --frozen --all-extras --dev
 
 The [complete bookstore source](examples/bookstore.py) is consumer-owned domain code wrapped by one
 integration boundary. It includes an async search, stable book references, a generated Click CLI,
-bounded actions, and confirmed mutations.
+bounded actions, and confirmed mutations. Books are seeded domain data; holds use a small SQLite
+store so create, read, cancel, and delete remain visible across CLI and MCP processes. Set
+`AGENT_SURFACE_BOOKSTORE_DB` to choose the database path.
 
 For use in your own project:
 
@@ -162,22 +164,34 @@ result:
   status: active
 next_actions:
   items:
-  - rel: inspect-book
-    description: ''
-    command: [./examples/bookstore, books, inspect, --book, book_dune]
-    operation: books.inspect
-    bound: {book: book_dune}
+  - rel: get
+    description: Read this hold
+    command: [./examples/bookstore, holds, get, --hold, hold_book_dune]
+    operation: holds.get
+    bound: {hold: hold_book_dune}
     slots: {}
   - rel: cancel
-    description: ''
+    description: Cancel this hold
     command: [./examples/bookstore, holds, cancel, --hold, hold_book_dune, --confirm]
     operation: holds.cancel
     bound: {hold: hold_book_dune, confirm: true}
     slots: {}
-  total: 2
-  returned: 2
+  - rel: delete
+    description: Delete this hold
+    command: [./examples/bookstore, holds, delete, --hold, hold_book_dune, --confirm]
+    operation: holds.delete
+    bound: {hold: hold_book_dune, confirm: true}
+    slots: {}
+  total: 3
+  returned: 3
   truncated: false
 ```
+
+The hold can now be read with `holds.get`, transitioned to `cancelled` with `holds.cancel`, or
+physically removed with `holds.delete`. The same SQLite state is available to MCP clients through
+the [`examples/bookstore-mcp`](examples/bookstore-mcp) stdio server. The
+[bookstore integration guide](docs/tutorials/bookstore.md#connect-codex-and-claude-code) shows the
+Codex and Claude Code configuration.
 
 That is HATEOAS—Hypermedia as the Engine of Application State—in practical terms: the response tells
 the caller what it can validly do next. An agent follows those exact links and command arrays through

@@ -102,3 +102,7 @@ asgi_app = adapter.streamable_http_app(stateless_http=True, json_response=True)
 The MCP SDK owns framing and transport lifecycle. Application code owns operations, references,
 actions, and policies. See the [Python API](python-api.md), [CLI contract](cli-contract.md), and
 [bookstore tutorial](../tutorials/bookstore.md).
+
+The repository's executable [`examples/bookstore-mcp`](../../examples/bookstore-mcp) is a complete
+stdio integration example. It shares persistent SQLite state with the bookstore CLI through
+`AGENT_SURFACE_BOOKSTORE_DB`; the tutorial includes ready-to-adapt Codex and Claude Code entries.
