@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+example_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+python="$example_dir/../.venv/bin/python"
+if [ ! -x "$python" ]; then
+  echo "bookstore-mcp requires the repository .venv; run: uv sync --frozen --all-extras --dev" >&2
+  exit 1
+fi
+cd "$example_dir/.."
+exec "$python" -m examples.bookstore_mcp

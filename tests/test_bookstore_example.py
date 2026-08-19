@@ -1,12 +1,16 @@
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-from mcp import Client
+from mcp import Client, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from agent_surface import OperationError
 from examples.bookstore import SearchRequest, build_surface
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def invoke(command, argv: list[str]):
@@ -176,3 +180,39 @@ async def test_created_hold_advertises_concrete_read_update_delete_actions(tmp_p
         "hold": "hold_book_dune",
         "confirm": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_bookstore_stdio_process_runs_persistent_crud(tmp_path) -> None:
+    server = StdioServerParameters(
+        command=str(ROOT / "examples" / "bookstore-mcp"),
+        env={"AGENT_SURFACE_BOOKSTORE_DB": str(tmp_path / "bookstore.sqlite3")},
+        cwd=ROOT,
+    )
+
+    async with Client(stdio_client(server), raise_exceptions=True, mode="legacy") as client:
+        tools = await client.list_tools()
+        created = await client.call_tool(
+            "holds.create", {"book": "book_dune", "confirm": True}
+        )
+        found = await client.call_tool(
+            "holds.get", {"hold": created.structured_content["result"]["id"]}
+        )
+        cancelled = await client.call_tool(
+            "holds.cancel", {"hold": "hold_book_dune", "confirm": True}
+        )
+        deleted = await client.call_tool(
+            "holds.delete", {"hold": "hold_book_dune", "confirm": True}
+        )
+        missing = await client.call_tool("holds.get", {"hold": "hold_book_dune"})
+
+    assert {tool.name for tool in tools.tools} >= {
+        "holds.create",
+        "holds.get",
+        "holds.cancel",
+        "holds.delete",
+    }
+    assert created.structured_content["result"] == found.structured_content["result"]
+    assert cancelled.structured_content["result"]["status"] == "cancelled"
+    assert deleted.structured_content["result"]["id"] == "hold_book_dune"
+    assert missing.structured_content["error"]["code"] == "hold_not_found"
