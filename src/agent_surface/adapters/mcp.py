@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import json
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -21,8 +22,10 @@ from agent_surface.budgets import OutputBudgetExceeded
 from agent_surface.contracts import ErrorOutcome, SuccessOutcome
 from agent_surface.operations import OperationDefinition, OperationError
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
-from agent_surface.references import ReferenceError, ReferenceRegistry
+from agent_surface.references import InvalidReference, ReferenceError, ReferenceRegistry
 from agent_surface.rendering import RenderOptions, render
+
+_MIN_MCP_BYTES = 1_024
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +52,11 @@ class MCPAdapter:
         self._references = references or ReferenceRegistry()
         self._action_provider = action_provider or NoActions()
         self._render_options = render_options or RenderOptions()
+        if self._render_options.budget.max_bytes < _MIN_MCP_BYTES:
+            raise ValueError(
+                f"MCP output budget must be at least {_MIN_MCP_BYTES} bytes so a "
+                "structured error can always be emitted"
+            )
         self._page_size = page_size
         self._plans = tuple(self._compile_tool(item) for item in app.operations.list())
         self._definitions = {item.name: item for item in app.operations.list()}
@@ -172,7 +180,15 @@ class MCPAdapter:
                 and isinstance(annotation, type)
                 and self._references.supports_type(annotation)
             ):
-                decoded[name] = self._references.decode_type(annotation, decoded[name])
+                try:
+                    decoded[name] = self._references.decode_type(annotation, decoded[name])
+                except ReferenceError:
+                    raise
+                except Exception as error:
+                    raise InvalidReference(
+                        "Reference token could not be decoded",
+                        fix="Use an ID produced by the registered reference codec.",
+                    ) from error
         return decoded
 
     def _error_result(
@@ -201,6 +217,9 @@ class MCPAdapter:
             and field.json_schema_extra.get("sensitive") is True
         }
         values = tuple(arguments[name] for name in sensitive if name in arguments)
+        string_secrets = tuple(
+            value for value in values if isinstance(value, str) and value
+        )
 
         def redact(value: Any, key: str | None = None) -> Any:
             if key in sensitive:
@@ -216,6 +235,9 @@ class MCPAdapter:
                 return tuple(redact(item) for item in value)
             if isinstance(value, list):
                 return [redact(item) for item in value]
+            if isinstance(value, str):
+                for secret in string_secrets:
+                    value = value.replace(secret, "<redacted>")
             return value
 
         return OperationError(
@@ -234,29 +256,60 @@ class MCPAdapter:
     ) -> types.CallToolResult:
         selected = outcome
         try:
-            text = render(selected, options=self._render_options)
+            text, document = self._render_payload(selected)
         except OutputBudgetExceeded as error:
             selected = error_outcome(
                 OperationError(error.code, str(error), details=(error.details,), fix=error.fix)
             )
-            text = render(selected, options=self._render_options)
+            text, document = self._render_payload(selected)
             is_error = True
-        document = selected.model_dump(mode="json", exclude_none=True)
         return types.CallToolResult(
             content=[types.TextContent(text=text)],
             structured_content=document,
             is_error=is_error,
         )
 
-    @staticmethod
-    def _compile_tool(definition: OperationDefinition) -> MCPToolPlan:
+    def _render_payload(
+        self,
+        outcome: SuccessOutcome[Any] | ErrorOutcome,
+    ) -> tuple[str, dict[str, Any]]:
+        text = render(outcome, options=self._render_options)
+        document = outcome.model_dump(mode="json", exclude_none=True)
+        structured = json.dumps(
+            document,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        measured = len(text.encode("utf-8")) + len(structured.encode("utf-8"))
+        if measured > self._render_options.budget.max_bytes:
+            raise OutputBudgetExceeded(
+                code="response_too_large",
+                message="MCP public content exceeds the byte budget",
+                details={
+                    "measured_bytes": measured,
+                    "max_bytes": self._render_options.budget.max_bytes,
+                },
+                fix="Retry with a lower item limit or a narrower detail level.",
+            )
+        return text, document
+
+    def _compile_tool(self, definition: OperationDefinition) -> MCPToolPlan:
         outcome_model = SuccessOutcome[definition.output_model]  # type: ignore[name-defined]
         output_schema = outcome_model.model_json_schema(
             mode="serialization"
         )
         input_schema = definition.input_model.model_json_schema(mode="validation")
+        properties = input_schema.setdefault("properties", {})
+        for name, field in definition.input_model.model_fields.items():
+            annotation = field.annotation
+            if isinstance(annotation, type) and self._references.supports_type(annotation):
+                original = properties.get(name, {})
+                properties[name] = {
+                    key: original[key]
+                    for key in ("title", "description")
+                    if key in original
+                } | {"type": "string"}
         if definition.destructive:
-            properties = input_schema.setdefault("properties", {})
             confirm_schema = properties.get("confirm")
             if confirm_schema is not None and confirm_schema.get("type") != "boolean":
                 raise ValueError("Destructive operation confirm field must be boolean")

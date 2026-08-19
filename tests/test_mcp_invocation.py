@@ -1,10 +1,11 @@
+import json
 from dataclasses import dataclass
 
 import pytest
 from mcp import Client
 from pydantic import BaseModel, Field
 
-from agent_surface import App, OperationError, ReferenceRegistry
+from agent_surface import App, OperationError, OutputBudget, ReferenceRegistry, RenderOptions
 from agent_surface.adapters.mcp import MCPAdapter
 
 
@@ -127,9 +128,52 @@ async def test_reference_tokens_decode_before_domain_invocation() -> None:
     adapter = MCPAdapter(app, references=references)
 
     async with Client(adapter.server, raise_exceptions=True) as client:
+        tools = await client.list_tools()
         result = await client.call_tool("books.inspect", {"book": "book_dune"})
 
+    book_schema = tools.tools[0].input_schema["properties"]["book"]
+    assert book_schema["type"] == "string"
     assert result.structured_content["result"] == {"message": "book_dune"}
+
+
+@pytest.mark.asyncio
+async def test_reference_codec_failure_is_a_stable_invalid_reference() -> None:
+    @dataclass(frozen=True)
+    class BookRef:
+        value: str
+
+    class RejectingCodec:
+        kind = "book"
+        python_type = BookRef
+
+        def encode(self, value: BookRef) -> str:
+            return value.value
+
+        def decode(self, token: str) -> BookRef:
+            raise ValueError("private codec detail")
+
+        def display(self, value: BookRef) -> str:
+            return value.value
+
+    class Request(BaseModel):
+        book: BookRef
+
+    app = App("books")
+
+    @app.operation("books.inspect")
+    def inspect(request: Request) -> EchoResult:
+        return EchoResult(message=request.book.value)
+
+    references = ReferenceRegistry()
+    references.register(RejectingCodec())
+    adapter = MCPAdapter(app, references=references)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("books.inspect", {"book": "missing"})
+
+    assert result.is_error is True
+    assert result.structured_content["error"]["code"] == "invalid_reference"
+    assert "private codec detail" not in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -143,8 +187,9 @@ async def test_sensitive_domain_details_are_recursively_redacted() -> None:
     def inspect(request: Request) -> EchoResult:
         raise OperationError(
             "token_rejected",
-            "Token rejected",
-            details=({"context": {"provided": request.token}},),
+            f"Token {request.token} rejected",
+            details=({"context": {"provided": f"value {request.token}"}},),
+            fix=f"Remove {request.token} and retry",
         )
 
     adapter = MCPAdapter(app)
@@ -154,3 +199,33 @@ async def test_sensitive_domain_details_are_recursively_redacted() -> None:
     assert result.is_error is True
     assert "consumer-secret" not in result.content[0].text
     assert "consumer-secret" not in str(result.structured_content)
+
+
+def test_mcp_adapter_rejects_budget_too_small_for_structured_errors() -> None:
+    with pytest.raises(ValueError, match="at least 1024 bytes"):
+        MCPAdapter(
+            echo_app(),
+            render_options=RenderOptions(budget=OutputBudget(max_bytes=100)),
+        )
+
+
+@pytest.mark.asyncio
+async def test_combined_text_and_structured_content_obey_the_byte_budget() -> None:
+    adapter = MCPAdapter(
+        echo_app(),
+        render_options=RenderOptions(budget=OutputBudget(max_bytes=1_024)),
+    )
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("message.echo", {"text": "x" * 500})
+
+    assert result.is_error is True
+    assert result.structured_content["error"]["code"] == "response_too_large"
+    public_bytes = len(result.content[0].text.encode()) + len(
+        json.dumps(
+            result.structured_content,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    )
+    assert public_bytes <= 1_024

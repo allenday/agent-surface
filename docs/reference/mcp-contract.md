@@ -45,8 +45,15 @@ rendering of the same public outcome for compatibility with clients that do not 
 content.
 
 References are decoded only through an explicitly registered `ReferenceCodec`; incidental
-`str(object)` conversion is never used. Sensitive request fields are recursively redacted from
-handled errors.
+`str(object)` conversion is never used. An exact registered reference field is advertised as a
+string token in the MCP input schema, matching the value the codec accepts. Codec rejection becomes
+a non-leaking `invalid_reference` error. Sensitive request fields and their lexical values are
+recursively redacted from handled errors.
+
+The output byte budget covers the combined YAML text and compact JSON encoding of
+`structuredContent`, excluding MCP/JSON-RPC framing owned by the SDK. It defaults to 65,536 bytes.
+MCP adapters reject budgets below 1,024 bytes so a complete structured size error remains
+representable; oversized successful or error outcomes are replaced by that bounded error.
 
 ## HATEOAS actions
 

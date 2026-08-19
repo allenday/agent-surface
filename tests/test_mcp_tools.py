@@ -57,7 +57,7 @@ async def test_native_tools_preserve_names_schemas_and_annotations() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_discovery_is_deterministic_and_cursor_paginated() -> None:
-    adapter = MCPAdapter(catalog_app(45), page_size=20)
+    adapter = MCPAdapter(catalog_app(400), page_size=20)
     names: list[str] = []
     cursor = None
 
@@ -70,7 +70,7 @@ async def test_tool_discovery_is_deterministic_and_cursor_paginated() -> None:
                 break
             cursor = page.next_cursor
 
-    assert names == [f"books.search-{index:03d}" for index in range(45)]
+    assert names == [f"books.search-{index:03d}" for index in range(400)]
 
 
 @pytest.mark.asyncio
