@@ -410,6 +410,7 @@ class BookstoreActions:
                 actions.append(
                     Action(
                         rel="cancel",
+                        description="Cancel this active hold",
                         operation="holds.cancel",
                         command=(
                             self._root,
@@ -425,6 +426,7 @@ class BookstoreActions:
             actions.append(
                 Action(
                     rel="delete",
+                    description="Delete this hold",
                     operation="holds.delete",
                     command=(
                         self._root,
@@ -442,12 +444,14 @@ class BookstoreActions:
                 (
                     Action(
                         rel="get",
+                        description="Read the cancelled hold",
                         operation="holds.get",
                         command=(self._root, "holds", "get", "--hold", result.id),
                         bound={"hold": result.id},
                     ),
                     Action(
                         rel="delete",
+                        description="Delete the cancelled hold",
                         operation="holds.delete",
                         command=(
                             self._root,
@@ -465,6 +469,7 @@ class BookstoreActions:
             actions.append(
                 Action(
                     rel="inspect-book",
+                    description="Inspect the released book",
                     operation="books.inspect",
                     command=(
                         self._root,

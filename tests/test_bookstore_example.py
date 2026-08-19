@@ -195,6 +195,34 @@ async def test_created_hold_advertises_concrete_read_update_delete_actions(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_contextual_action_descriptions_are_complete(tmp_path) -> None:
+    surface = build_surface(db_path=tmp_path / "bookstore.sqlite3")
+    created = await surface.app.invoke(
+        "holds.create", {"book": {"value": "book_dune"}, "confirm": True}
+    )
+    active = await surface.app.invoke("holds.get", {"hold": created.id})
+    cancelled = await surface.app.invoke(
+        "holds.cancel", {"hold": created.id, "confirm": True}
+    )
+    persisted = await surface.app.invoke("holds.get", {"hold": created.id})
+    deleted = await surface.app.invoke(
+        "holds.delete", {"hold": created.id, "confirm": True}
+    )
+
+    results = (
+        ("holds.create", created),
+        ("holds.get", active),
+        ("holds.cancel", cancelled),
+        ("holds.get", persisted),
+        ("holds.delete", deleted),
+    )
+    for operation, result in results:
+        actions = surface.actions.actions_for(operation=operation, result=result)
+        assert actions.items
+        assert all(action.description for action in actions.items)
+
+
+@pytest.mark.asyncio
 async def test_book_availability_and_reserve_action_follow_persisted_hold_state(tmp_path) -> None:
     surface = build_surface(db_path=tmp_path / "bookstore.sqlite3")
 
