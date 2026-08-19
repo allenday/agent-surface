@@ -1,5 +1,7 @@
 """The sole boundary between the consumer domain and agent-surface."""
 
+from typing import TYPE_CHECKING
+
 from agent_surface import App, OperationError, ReferenceRegistry
 from tests.reference_consumer.domain import (
     Catalog,
@@ -13,6 +15,9 @@ from tests.reference_consumer.domain import (
     ResourceRecord,
     ResourceRef,
 )
+
+if TYPE_CHECKING:
+    from agent_surface.adapters.mcp import MCPAdapter
 
 
 class ResourceRefCodec:
@@ -91,3 +96,12 @@ def build_app(service: Catalog | None = None) -> tuple[App, Catalog]:
             ) from error
 
     return app, catalog
+
+
+def build_mcp_adapter(service: Catalog | None = None) -> tuple["MCPAdapter", Catalog]:
+    """Construct MCP only at the consumer's transport integration boundary."""
+
+    from agent_surface.adapters.mcp import MCPAdapter
+
+    app, catalog = build_app(service)
+    return MCPAdapter(app, references=build_references()), catalog
