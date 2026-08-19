@@ -173,7 +173,11 @@ class Bookstore:
                 details=({"book": request.book.value},),
                 fix="Choose a book reference returned by books.search.",
             ) from error
-        return BookDetail(**book.model_dump(), available=True)
+        existing_hold = self._database.execute(
+            "SELECT 1 FROM holds WHERE book = ? LIMIT 1",
+            (request.book.value,),
+        ).fetchone()
+        return BookDetail(**book.model_dump(), available=existing_hold is None)
 
     def create_hold(self, request: CreateHoldRequest) -> Hold:
         self.inspect(InspectRequest(book=request.book))
@@ -205,27 +209,47 @@ class Bookstore:
                 details=({"hold": request.hold},),
                 fix="Choose a hold returned by holds.create.",
             )
-        return Hold(
-            id=row["id"],
-            book=BookRef(value=row["book"]),
-            status=row["status"],
+        return self._hold_from_row(row)
+
+    @staticmethod
+    def _hold_from_row(row: sqlite3.Row) -> Hold:
+        return Hold(id=row["id"], book=BookRef(value=row["book"]), status=row["status"])
+
+    @staticmethod
+    def _missing_hold(hold: str) -> OperationError:
+        return OperationError(
+            "hold_not_found",
+            "Hold was not found",
+            details=({"hold": hold},),
+            fix="Choose a hold returned by holds.create.",
         )
 
     def cancel_hold(self, request: CancelHoldRequest) -> Hold:
-        hold = self.get_hold(GetHoldRequest(hold=request.hold))
-        cancelled = hold.model_copy(update={"status": "cancelled"})
         with self._database:
+            self._database.execute("BEGIN IMMEDIATE")
+            row = self._database.execute(
+                "SELECT id, book, status FROM holds WHERE id = ?",
+                (request.hold,),
+            ).fetchone()
+            if row is None:
+                raise self._missing_hold(request.hold)
             self._database.execute(
                 "UPDATE holds SET status = ? WHERE id = ?",
-                (cancelled.status, cancelled.id),
+                ("cancelled", request.hold),
             )
-        return cancelled
+        return self._hold_from_row(row).model_copy(update={"status": "cancelled"})
 
     def delete_hold(self, request: DeleteHoldRequest) -> Hold:
-        hold = self.get_hold(GetHoldRequest(hold=request.hold))
         with self._database:
-            self._database.execute("DELETE FROM holds WHERE id = ?", (hold.id,))
-        return hold
+            self._database.execute("BEGIN IMMEDIATE")
+            row = self._database.execute(
+                "SELECT id, book, status FROM holds WHERE id = ?",
+                (request.hold,),
+            ).fetchone()
+            if row is None:
+                raise self._missing_hold(request.hold)
+            self._database.execute("DELETE FROM holds WHERE id = ?", (request.hold,))
+        return self._hold_from_row(row)
 
 
 class BookstoreActions:
@@ -318,27 +342,29 @@ class BookstoreActions:
                     )
                 )
         elif operation == "books.inspect" and isinstance(result, BookDetail):
-            actions.append(
-                Action(
-                    rel="reserve",
-                    description="Reserve this available book",
-                    operation="holds.create",
-                    command=(
-                        self._root,
-                        "holds",
-                        "create",
-                        "--book",
-                        result.ref.value,
-                        "--confirm",
-                    ),
-                    bound={"book": result.ref.value, "confirm": True},
+            if result.available:
+                actions.append(
+                    Action(
+                        rel="reserve",
+                        description="Reserve this available book",
+                        operation="holds.create",
+                        command=(
+                            self._root,
+                            "holds",
+                            "create",
+                            "--book",
+                            result.ref.value,
+                            "--confirm",
+                        ),
+                        bound={"book": result.ref.value, "confirm": True},
+                    )
                 )
-            )
         elif operation == "holds.create" and isinstance(result, Hold):
             actions.extend(
                 (
                     Action(
                         rel="get",
+                        description="Read this hold",
                         operation="holds.get",
                         command=(
                             self._root,
@@ -351,6 +377,7 @@ class BookstoreActions:
                     ),
                     Action(
                         rel="cancel",
+                        description="Cancel this hold",
                         operation="holds.cancel",
                         command=(
                             self._root,
@@ -364,6 +391,7 @@ class BookstoreActions:
                     ),
                     Action(
                         rel="delete",
+                        description="Delete this hold",
                         operation="holds.delete",
                         command=(
                             self._root,

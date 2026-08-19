@@ -126,6 +126,8 @@ def test_bookstore_docs_cover_persistent_crud_and_local_mcp_clients() -> None:
         "standard library",
         "https://developers.openai.com/codex/mcp",
         "https://code.claude.com/docs/en/mcp",
+        "${CLAUDE_PROJECT_DIR:-.}",
+        r".venv\Scripts\python.exe",
     ):
         assert required in tutorial
 

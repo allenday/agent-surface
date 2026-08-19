@@ -1,6 +1,8 @@
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from click.testing import CliRunner
@@ -8,7 +10,14 @@ from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from agent_surface import OperationError
-from examples.bookstore import SearchRequest, build_surface
+from examples.bookstore import (
+    Bookstore,
+    CancelHoldRequest,
+    CreateHoldRequest,
+    DeleteHoldRequest,
+    SearchRequest,
+    build_surface,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -180,6 +189,86 @@ async def test_created_hold_advertises_concrete_read_update_delete_actions(tmp_p
         "hold": "hold_book_dune",
         "confirm": True,
     }
+    assert actions["get"]["description"] == "Read this hold"
+    assert actions["cancel"]["description"] == "Cancel this hold"
+    assert actions["delete"]["description"] == "Delete this hold"
+
+
+@pytest.mark.asyncio
+async def test_book_availability_and_reserve_action_follow_persisted_hold_state(tmp_path) -> None:
+    surface = build_surface(db_path=tmp_path / "bookstore.sqlite3")
+
+    before = await surface.app.invoke("books.inspect", {"book": {"value": "book_dune"}})
+    before_actions = surface.actions.actions_for(operation="books.inspect", result=before)
+    created = await surface.app.invoke(
+        "holds.create", {"book": {"value": "book_dune"}, "confirm": True}
+    )
+    active = await surface.app.invoke("books.inspect", {"book": {"value": "book_dune"}})
+    active_actions = surface.actions.actions_for(operation="books.inspect", result=active)
+    await surface.app.invoke(
+        "holds.cancel", {"hold": created.id, "confirm": True}
+    )
+    cancelled = await surface.app.invoke("books.inspect", {"book": {"value": "book_dune"}})
+    cancelled_actions = surface.actions.actions_for(
+        operation="books.inspect", result=cancelled
+    )
+    await surface.app.invoke("holds.delete", {"hold": created.id, "confirm": True})
+    deleted = await surface.app.invoke("books.inspect", {"book": {"value": "book_dune"}})
+    deleted_actions = surface.actions.actions_for(operation="books.inspect", result=deleted)
+
+    assert before.available is True
+    assert [action.rel for action in before_actions.items] == ["reserve"]
+    assert active.available is False
+    assert active_actions.items == ()
+    assert cancelled.available is False
+    assert cancelled_actions.items == ()
+    assert deleted.available is True
+    assert [action.rel for action in deleted_actions.items] == ["reserve"]
+
+
+def test_delete_is_atomic_across_two_connections(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "bookstore.sqlite3"
+    surface = build_surface(db_path=database)
+    surface.store.create_hold(
+        CreateHoldRequest(book={"value": "book_dune"}, confirm=True)
+    )
+    original_get = Bookstore.get_hold
+    reads = Barrier(2)
+
+    def synchronized_get(store, request):
+        hold = original_get(store, request)
+        reads.wait(timeout=5)
+        return hold
+
+    monkeypatch.setattr(Bookstore, "get_hold", synchronized_get)
+
+    def delete() -> str:
+        store = Bookstore(database)
+        try:
+            store.delete_hold(DeleteHoldRequest(hold="hold_book_dune", confirm=True))
+        except OperationError as error:
+            return error.code
+        return "deleted"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _: delete(), range(2)))
+
+    assert sorted(outcomes) == ["deleted", "hold_not_found"]
+
+
+def test_cancel_is_one_atomic_statement(tmp_path, monkeypatch) -> None:
+    store = Bookstore(tmp_path / "bookstore.sqlite3")
+    store.create_hold(CreateHoldRequest(book={"value": "book_dune"}, confirm=True))
+
+    def unexpected_read(*args, **kwargs):
+        raise AssertionError("cancel must not read before updating")
+
+    monkeypatch.setattr(store, "get_hold", unexpected_read)
+
+    cancelled = store.cancel_hold(
+        CancelHoldRequest(hold="hold_book_dune", confirm=True)
+    )
+    assert cancelled.status == "cancelled"
 
 
 @pytest.mark.asyncio

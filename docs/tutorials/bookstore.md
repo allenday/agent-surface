@@ -151,16 +151,15 @@ claude mcp add --transport stdio --scope user --env AGENT_SURFACE_BOOKSTORE_DB=/
 claude mcp list
 ```
 
-Or commit a project-scoped `.mcp.json`:
+Or commit this portable project-scoped `.mcp.json`. Claude expands `CLAUDE_PROJECT_DIR`, and the
+server uses the default user-data database because this form intentionally omits the environment
+override:
 
 ```json
 {
   "mcpServers": {
     "bookstore": {
-      "command": "/absolute/path/to/agent-surface/examples/bookstore-mcp",
-      "env": {
-        "AGENT_SURFACE_BOOKSTORE_DB": "/absolute/path/to/bookstore.sqlite3"
-      }
+      "command": "${CLAUDE_PROJECT_DIR:-.}/examples/bookstore-mcp"
     }
   }
 }
@@ -170,3 +169,8 @@ Use `/mcp` in Claude Code to inspect or authenticate configured servers. See the
 [official Claude Code MCP guide](https://code.claude.com/docs/en/mcp) for scope and transport
 details. Both clients invoke the same dotted tools and persist holds in the same database when they
 share `AGENT_SURFACE_BOOKSTORE_DB`.
+
+The checked-in `examples/bookstore-mcp` convenience wrapper targets POSIX shells on macOS and Linux.
+On Windows, configure the client to run the checkout's `.venv\Scripts\python.exe` with arguments
+`-m examples.bookstore_mcp` and the repository root as its working directory. SQLite itself remains
+cross-platform and still requires no separate package.
