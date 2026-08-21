@@ -189,7 +189,14 @@ def test_critical_directories_have_scoped_agent_instructions() -> None:
         "tests/AGENTS.md",
         "examples/AGENTS.md",
         "docs/AGENTS.md",
+        "docs/tutorials/AGENTS.md",
+        "docs/concepts/AGENTS.md",
+        "docs/how-to/AGENTS.md",
+        "docs/reference/AGENTS.md",
+        "docs/plans/AGENTS.md",
         ".github/AGENTS.md",
+        ".github/workflows/AGENTS.md",
+        ".github/ISSUE_TEMPLATE/AGENTS.md",
     ):
         assert (ROOT / path).is_file(), path
 

@@ -50,6 +50,12 @@ uv build
 - `docs/adoption.md`: consumer domain/integration/transport boundary
 - `docs/plans/`: approved designs and implementation plans
 
+## Scoped instructions
+
+Read the nearest `AGENTS.md` before changing a subtree. The root contract applies everywhere;
+local sidecars add only the conventions that differ. In particular, `docs/` splits by documentation
+genre, and `.github/` splits workflow safety from contributor-template structure.
+
 ## Implementation rules
 
 - Use test-driven development for behavior changes: observe RED, implement minimally, then GREEN.
