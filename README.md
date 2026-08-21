@@ -101,6 +101,14 @@ HATEOAS—Hypermedia as the Engine of Application State—means a response adver
 transitions valid from its current state. A caller follows them; it does not reconstruct a command
 tree from memory.
 
+For example, in the [bookstore tutorial](docs/tutorials/bookstore.md) tutorial, a call like:
+
+```bash
+./examples/bookstore books search --query dune --limit 2
+```
+
+produces output like:
+
 ```yaml
 result:
   items: [{ref: {value: book_dune}, title: Dune}]
