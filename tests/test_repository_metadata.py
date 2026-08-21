@@ -72,7 +72,6 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "hateoas",
         "https://en.wikipedia.org/wiki/hateoas",
         "https://modelcontextprotocol.io/docs/getting-started/intro",
-        "get up and running in 5 seconds",
         "agent-surface[mcp]",
         "from agent_surface import app",
         "next_actions",
@@ -99,12 +98,21 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
     assert "hello_mcp.py" not in normalized
     assert len(readme.splitlines()) <= 260
 
-    promise = normalized.index("typed python operations that become")
-    show_and_tell = normalized.index("class greetrequest")
-    install_and_run = normalized.index("pip install 'agent-surface[mcp]'")
-    mcp_configuration = normalized.index("~/.codex/config.toml")
-    skill_installation = normalized.index("src/agent_surface/skills/install.sh | sh")
-    assert promise < skill_installation < show_and_tell < install_and_run < mcp_configuration
+
+
+def test_readme_progressively_discloses_the_first_user_journey() -> None:
+    readme = (ROOT / "README.md").read_text().lower()
+
+    promise = readme.index("typed python operations that become")
+    trajectory = readme.index("## see a hateoas trajectory")
+    library = readme.index("## use the library now")
+    mcp = readme.index("## connect it to mcp")
+    authoring = readme.index("## author a new surface")
+
+    assert promise < trajectory < library < mcp < authoring
+    assert "./examples/bookstore books inspect --book book_dune" in readme
+    assert "operation: books.inspect" in readme
+    assert "bound: {book: book_dune}" in readme
 
 
 def test_skill_installer_and_authoring_preflight_keep_environment_choices_with_the_user() -> None:

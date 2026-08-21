@@ -2,32 +2,48 @@
 
 [![CI](https://github.com/allenday/agent-surface/actions/workflows/ci.yml/badge.svg)](https://github.com/allenday/agent-surface/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/agent-surface.svg)](https://pypi.org/project/agent-surface/)
-[![Python](https://img.shields.io/pypi/pyversions/agent-surface.svg)](https://pypi.org/project/agent-surface/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Typed Python operations that become [HATEOAS](https://en.wikipedia.org/wiki/HATEOAS)
-CLI and [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) surfaces—so people and
-agents can discover and take the next valid action without guessing commands, routes, or object
-encodings.
+Typed Python operations that become [HATEOAS](https://en.wikipedia.org/wiki/HATEOAS) CLI and
+[MCP](https://modelcontextprotocol.io/docs/getting-started/intro) surfaces. A response tells a
+person or agent the next valid thing to do, so callers follow concrete actions instead of guessing
+commands, routes, or object encodings.
 
-Define an operation once with Pydantic; project it as a YAML-first Click CLI and native MCP tools
-with bounded, concrete `next_actions`.
+Define an operation once with Pydantic. `agent-surface` projects it as a YAML-first Click CLI and
+native MCP tools with bounded, concrete `next_actions`.
 
-## Get up and running in 5 seconds
+## See a HATEOAS trajectory
 
-Install the general-purpose `agent-friendly-cli-design` for building HATEOAS CLI tools, generally, and the `agent-surface-authoring` for building with this `agent-surface` project, specifically:
+From a checkout of this repository, run the bookstore example:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/install.sh | sh
+uv sync --frozen --all-extras --dev
+./examples/bookstore books search --query dune --limit 2
 ```
 
-Then tell your agent to load the `agent-surface-authoring` to get started building a HATEOAS CLI or MCP tool.
+It returns an item and the next action that is valid for that item:
 
-Followup: Read the skill files directly.
-- [agent-friendly-cli-design/SKILL.md](src/agent_surface/skills/agent-friendly-cli-design/SKILL.md)
-- [agent-surface-authoring/SKILL.md](src/agent_surface/skills/agent-surface-authoring/SKILL.md)
+```yaml
+result:
+  items: [{ref: {value: book_dune}, title: Dune}]
+next_actions:
+  items: [{rel: inspect, command: [./examples/bookstore, books, inspect, --book, book_dune], operation: books.inspect, bound: {book: book_dune}}]
+  total: 1
+  returned: 1
+  truncated: false
+```
 
-## In 30 more seconds
+Follow the advertised CLI command verbatim:
+
+```bash
+./examples/bookstore books inspect --book book_dune
+```
+
+For MCP, call `operation: books.inspect` with `bound: {book: book_dune}` instead. The complete
+search → inspect → reserve → cancel → delete trajectory is executable in the
+[bookstore tutorial](docs/tutorials/bookstore.md).
+
+## Use the library now
 
 Save this as `hello.py`:
 
@@ -68,23 +84,21 @@ if __name__ == "__main__":
         cli()
 ```
 
-Install it and run the command:
+Install the package into your existing Python environment and run the CLI:
 
 ```bash
 pip install 'agent-surface[mcp]'
 python hello.py people greet --name Ada
 ```
 
-The same typed operation is now callable from Python, exposed through Click, and available as the
-exact MCP tool `people.greet`.
+The same typed operation is callable from Python, exposed through Click, and available as the exact
+MCP tool `people.greet`.
 
-## Use it from MCP
+## Connect it to MCP
 
 For a local client, use **stdio**: the client starts `hello.py --mcp` and exchanges MCP messages
-over its standard input and output.
-
-Add this to `~/.codex/config.toml`, replacing both absolute paths with yours. `python` must be the
-interpreter where you installed `agent-surface`:
+over standard input and output. Add this to `~/.codex/config.toml`, replacing both absolute paths.
+`python` must be the interpreter where you installed `agent-surface`:
 
 ```toml
 [mcp_servers.hello]
@@ -106,50 +120,35 @@ project-local `.mcp.json` next to `hello.py`:
 }
 ```
 
-Streamable HTTP is for serving MCP remotely from a web application; it is not needed for this
-local setup. See the [MCP contract](docs/reference/mcp-contract.md) when you need that deployment.
+Streamable HTTP is only for serving MCP remotely from a web application. See the
+[MCP contract](docs/reference/mcp-contract.md) when you need that deployment.
 
-## Why HATEOAS matters here
+## Author a new surface
 
-HATEOAS—Hypermedia as the Engine of Application State—means a response advertises the concrete
-transitions valid from its current state. A caller follows them; it does not reconstruct a command
-tree from memory.
-
-For example, in the [bookstore tutorial](docs/tutorials/bookstore.md) tutorial, a call like:
+Install the optional authoring skills for an agent that will build a HATEOAS CLI or MCP tool:
 
 ```bash
-./examples/bookstore books search --query dune --limit 2
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/install.sh | sh
 ```
 
-produces output like:
+The `agent-surface-authoring` skill first checks how the current project manages Python before it
+uses the library; it does not choose a virtual environment or install packages globally. You can
+also read the skills directly:
 
-```yaml
-result:
-  items: [{ref: {value: book_dune}, title: Dune}]
-next_actions:
-  items:
-  - rel: inspect
-    command: [./examples/bookstore, books, inspect, --book, book_dune]
-    operation: books.inspect
-    bound: {book: book_dune}
-  total: 1
-  returned: 1
-  truncated: false
-```
+- [agent-surface-authoring/SKILL.md](src/agent_surface/skills/agent-surface-authoring/SKILL.md)
+- [agent-friendly-cli-design/SKILL.md](src/agent_surface/skills/agent-friendly-cli-design/SKILL.md)
 
-For Click, follow `command`. For MCP, call `operation` with `bound`. The complete executable
-search → inspect → reserve → cancel → delete trajectory is in the
-[bookstore tutorial](docs/tutorials/bookstore.md).
+## Go deeper when needed
 
-## Choose your path
-
-- **Evaluate the idea.** Read [HATEOAS and bounded discovery](docs/concepts/hateoas.md), then run
-  the [bookstore example](examples/bookstore.py).
-- **Adopt it in an application.** Start with the [Python API](docs/reference/python-api.md) and the
+- **Evaluate the approach.** Read [HATEOAS and bounded discovery](docs/concepts/hateoas.md), then
+  run the [bookstore example](examples/bookstore.py).
+- **Adopt it in an application.** Start with the [Python API](docs/reference/python-api.md) and
   [existing-application guide](docs/how-to/adopt-an-existing-app.md), then add
-  [references and actions](docs/how-to/references-and-actions.md) when your domain needs them.
+  [references and actions](docs/how-to/references-and-actions.md).
 - **Connect an agent.** Follow the [bookstore MCP integration](docs/tutorials/bookstore.md#connect-codex-and-claude-code),
   [MCP contract](docs/reference/mcp-contract.md), and [CLI contract](docs/reference/cli-contract.md).
+- **Contribute or release.** Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
+  [release guide](docs/releasing.md).
 
 ## Principles
 
@@ -157,9 +156,6 @@ search → inspect → reserve → cancel → delete trajectory is in the
 - YAML-first structured output with compact flow style for small values
 - bounded HATEOAS `next_actions`, stable references, and explicit confirmation for writes
 - predictable discovery and repair-oriented errors
-
-For contribution and release details, see [CONTRIBUTING.md](CONTRIBUTING.md) and the
-[release guide](docs/releasing.md).
 
 ## License
 
