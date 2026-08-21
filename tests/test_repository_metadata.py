@@ -72,7 +72,7 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "hateoas",
         "https://en.wikipedia.org/wiki/hateoas",
         "https://modelcontextprotocol.io/docs/getting-started/intro",
-        "30 seconds",
+        "get up and running in 5 seconds",
         "agent-surface[mcp]",
         "from agent_surface import app",
         "next_actions",
@@ -87,12 +87,9 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "asyncio.run(mcp.run_stdio())",
         "~/.codex/config.toml",
         '"mcpservers"',
-        "mkdir -p ~/.codex/skills/agent-friendly-cli-design",
-        "curl -fssl",
-        "agent-friendly-cli-design/reference.md",
+        "src/agent_surface/skills/install.sh | sh",
         "agent-surface-authoring",
         "agent-surface-authoring/skill.md",
-        "agent-surface-authoring/reference.md",
     ):
         assert required in normalized
     old_hateoas_url = (
@@ -106,8 +103,21 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
     show_and_tell = normalized.index("class greetrequest")
     install_and_run = normalized.index("pip install 'agent-surface[mcp]'")
     mcp_configuration = normalized.index("~/.codex/config.toml")
-    skill_installation = normalized.index("mkdir -p ~/.codex/skills/agent-friendly-cli-design")
-    assert promise < show_and_tell < install_and_run < mcp_configuration < skill_installation
+    skill_installation = normalized.index("src/agent_surface/skills/install.sh | sh")
+    assert promise < skill_installation < show_and_tell < install_and_run < mcp_configuration
+
+
+def test_skill_installer_and_authoring_preflight_keep_environment_choices_with_the_user() -> None:
+    installer = (ROOT / "src" / "agent_surface" / "skills" / "install.sh").read_text()
+    skill = (
+        ROOT / "src" / "agent_surface" / "skills" / "agent-surface-authoring" / "SKILL.md"
+    ).read_text()
+
+    assert installer.startswith("#!/bin/sh\nset -eu\n")
+    assert "pip install" not in installer
+    assert "Environment preflight" in skill
+    assert "Do not choose or create a virtual environment" in skill
+    assert "agent-surface[mcp]" in skill
 
 
 def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:

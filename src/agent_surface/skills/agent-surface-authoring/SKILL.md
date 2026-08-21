@@ -13,6 +13,19 @@ Keep the domain consumer-owned; `agent-surface` owns the integration boundary an
 Use `agent-friendly-cli-design` when deciding a general CLI contract. Use this skill when applying
 that contract with this package.
 
+## Environment preflight
+
+Before writing or running an `agent-surface` integration:
+
+1. Inspect the repository for its established Python environment and dependency workflow.
+2. Check whether `agent_surface` imports in that environment.
+3. If it is unavailable, explain the appropriate project-local installation, such as
+   `pip install 'agent-surface[mcp]'`, and ask before changing the environment.
+4. Verify the import in the chosen environment, then continue.
+
+Do not choose or create a virtual environment, install globally, or change the project dependency
+manager on the user's behalf. The user or repository owns that decision.
+
 ## Recipe
 
 1. Put strict Pydantic request and result models beside a thin integration wrapper around the domain

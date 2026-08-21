@@ -18,7 +18,7 @@ with bounded, concrete `next_actions`.
 Install the general-purpose `agent-friendly-cli-design` for building HATEOAS CLI tools, generally, and the `agent-surface-authoring` for building with this `agent-surface` project, specifically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/install.sh
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/install.sh | sh
 ```
 
 Then tell your agent to load the `agent-surface-authoring` to get started building a HATEOAS CLI or MCP tool.
