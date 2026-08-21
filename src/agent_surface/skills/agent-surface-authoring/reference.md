@@ -42,7 +42,9 @@ class Widget(Model):
 
 
 service = make_consumer_owned_service()
-app = App("widgets", references=ReferenceRegistry([WidgetRefCodec()]))
+references = ReferenceRegistry()
+references.register(WidgetRefCodec())
+app = App("widgets")
 
 
 @app.operation("widgets.inspect", summary="Inspect one widget", read_only=True)
@@ -58,8 +60,8 @@ def inspect_widget(request: InspectRequest) -> Widget:
         ) from error
 
 
-cli = build_click_group(app)
-mcp = MCPAdapter(app)
+cli = build_click_group(app, references=references)
+mcp = MCPAdapter(app, references=references)
 ```
 
 `make_consumer_owned_service` and `WidgetMissing` are placeholders for the host application. The
