@@ -53,29 +53,31 @@ def test_readme_orients_users_and_contributors() -> None:
 
     assert "actions/workflows/ci.yml/badge.svg" in readme
     assert "pypi/v/agent-surface.svg" in readme
-    assert "pip install agent-surface" in readme
+    assert "agent-surface[mcp]" in readme
     assert "from agent_surface import App" in readme
     assert "CONTRIBUTING.md" in readme
 
 
-def test_readme_teaches_a_complete_hateoas_trajectory() -> None:
+def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
     readme = (ROOT / "README.md").read_text()
     normalized = readme.lower()
 
     for required in (
         "hateoas",
-        "five-minute",
-        "books search --query dune",
-        "books inspect --book book_dune",
-        "holds create --book book_dune --confirm",
+        "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_3",
+        "https://modelcontextprotocol.io/docs/getting-started/intro",
+        "30 seconds",
+        "agent-surface[mcp]",
+        "from agent_surface import app",
         "next_actions",
+        "src/agent_surface/skills/agent-friendly-cli-design/skill.md",
         "docs/tutorials/bookstore.md",
         "docs/concepts/hateoas.md",
         "docs/how-to/adopt-an-existing-app.md",
-        "docs/reference/cli-contract.md",
-        "docs/reference/python-api.md",
+        "docs/reference/mcp-contract.md",
     ):
         assert required in normalized
+    assert len(readme.splitlines()) <= 200
 
 
 def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:
@@ -105,18 +107,17 @@ def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:
 
 
 def test_bookstore_docs_cover_persistent_crud_and_local_mcp_clients() -> None:
-    readme = (ROOT / "README.md").read_text()
     tutorial = (ROOT / "docs" / "tutorials" / "bookstore.md").read_text()
 
     assert (ROOT / "examples" / "bookstore-mcp").stat().st_mode & 0o111
     for required in (
         "examples/bookstore-mcp",
         "AGENT_SURFACE_BOOKSTORE_DB",
-        "holds.get",
-        "holds.cancel",
-        "holds.delete",
+        "holds get",
+        "holds cancel",
+        "holds delete",
     ):
-        assert required in readme
+        assert required in tutorial
     for required in (
         "[mcp_servers.bookstore]",
         "codex mcp add bookstore",
@@ -200,7 +201,7 @@ def test_adoption_boundary_is_documented_and_linked() -> None:
     guide = guide_path.read_text()
     readme = (ROOT / "README.md").read_text()
     agent_guide = (ROOT / "AGENTS.md").read_text()
-    assert "docs/adoption.md" in readme
+    assert "docs/how-to/adopt-an-existing-app.md" in readme
     assert "docs/adoption.md" in agent_guide
     for required in (
         "consumer-owned",
@@ -215,17 +216,19 @@ def test_adoption_boundary_is_documented_and_linked() -> None:
 
 def test_bounded_rendering_contract_is_public_and_agent_enforced() -> None:
     readme = (ROOT / "README.md").read_text()
+    python_api = (ROOT / "docs" / "reference" / "python-api.md").read_text()
+    mcp_contract = (ROOT / "docs" / "reference" / "mcp-contract.md").read_text()
     agent_guide = (ROOT / "AGENTS.md").read_text()
 
+    assert "docs/reference/python-api.md" in readme
+    assert "docs/reference/mcp-contract.md" in readme
     for required in (
         "RenderOptions",
         "BoundedCollection",
         "render_envelope",
-        'yaml_style="flow"',
-        'format="json"',
-        "65,536",
     ):
-        assert required in readme
+        assert required in python_api
+    assert "65,536" in mcp_contract
     for required in (
         "rendering.py",
         "never fabricate pagination",
@@ -236,9 +239,11 @@ def test_bounded_rendering_contract_is_public_and_agent_enforced() -> None:
 
 def test_bounded_action_discovery_contract_is_public_and_agent_enforced() -> None:
     readme = (ROOT / "README.md").read_text()
+    references = (ROOT / "docs" / "how-to" / "references-and-actions.md").read_text()
     adoption = (ROOT / "docs" / "adoption.md").read_text()
     agent_guide = (ROOT / "AGENTS.md").read_text()
 
+    assert "docs/how-to/references-and-actions.md" in readme
     for required in (
         "ReferenceCodec",
         "ReferenceRegistry",
@@ -247,7 +252,7 @@ def test_bounded_action_discovery_contract_is_public_and_agent_enforced() -> Non
         "@action",
         "immediate continuation",
     ):
-        assert required in readme
+        assert required in references
     for required in (
         "exact-name",
         "explicit policy",
