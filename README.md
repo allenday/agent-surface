@@ -140,6 +140,8 @@ also read the skills directly:
 
 ## Go deeper when needed
 
+Start with the [documentation map](docs/README.md) if you are unsure which path fits.
+
 - **Evaluate the approach.** Read [HATEOAS and bounded discovery](docs/concepts/hateoas.md), then
   run the [bookstore example](examples/bookstore.py).
 - **Adopt it in an application.** Start with the [Python API](docs/reference/python-api.md) and

@@ -12,3 +12,5 @@ These instructions extend the repository-root `AGENTS.md` for `docs/`.
   `operation` plus `bound` arguments.
 - Document MCP wire names such as `structuredContent` and `nextCursor` separately from Python SDK
   attributes such as `structured_content` and `next_cursor`.
+- Keep `docs/README.md` as the durable navigation map. Plans preserve history; they are never a
+  primary reader journey.

@@ -62,6 +62,7 @@ def test_readme_orients_users_and_contributors() -> None:
     assert "agent-surface[mcp]" in readme
     assert "from agent_surface import App" in readme
     assert "CONTRIBUTING.md" in readme
+    assert "pypi/pyversions/agent-surface.svg" not in readme
 
 
 def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
@@ -211,6 +212,24 @@ def test_public_markdown_internal_links_resolve() -> None:
                 continue
             relative = target.split("#", 1)[0]
             assert (document.parent / relative).resolve().exists(), f"{document}: {target}"
+
+
+def test_durable_docs_have_a_canonical_navigation_map() -> None:
+    index = ROOT / "docs" / "README.md"
+
+    assert index.is_file()
+    contents = index.read_text().lower()
+    for required in (
+        "evaluate",
+        "adopt",
+        "connect",
+        "contribute",
+        "tutorial",
+        "how-to",
+        "reference",
+        "plans",
+    ):
+        assert required in contents
 
 
 def test_agent_guide_contains_executable_repository_contract() -> None:
