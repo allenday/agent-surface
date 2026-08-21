@@ -72,7 +72,7 @@ result:
 next_actions:
   items:
   - rel: inspect
-    command: [bookstore, books, inspect, --book, book_dune]
+    command: [./examples/bookstore, books, inspect, --book, book_dune]
     operation: books.inspect
     bound: {book: book_dune}
   total: 1

@@ -70,6 +70,7 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "agent-surface[mcp]",
         "from agent_surface import app",
         "next_actions",
+        "./examples/bookstore",
         "src/agent_surface/skills/agent-friendly-cli-design/skill.md",
         "docs/tutorials/bookstore.md",
         "docs/concepts/hateoas.md",
