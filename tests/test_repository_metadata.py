@@ -114,6 +114,9 @@ def test_readme_progressively_discloses_the_first_user_journey() -> None:
     assert "./examples/bookstore books inspect --book book_dune" in readme
     assert "operation: books.inspect" in readme
     assert "bound: {book: book_dune}" in readme
+    assert "title: dune messiah" in readme
+    assert "rel: next-page" in readme
+    assert "next_cursor: book_dune_messiah" in readme
 
 
 def test_skill_installer_and_authoring_preflight_keep_environment_choices_with_the_user() -> None:

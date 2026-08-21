@@ -21,15 +21,38 @@ uv sync --frozen --all-extras --dev
 ./examples/bookstore books search --query dune --limit 2
 ```
 
-It returns an item and the next action that is valid for that item:
+The relevant fields from its YAML envelope show the first page and its concrete next actions:
 
 ```yaml
 result:
-  items: [{ref: {value: book_dune}, title: Dune}]
+  query: dune
+  items:
+  - ref: {value: book_dune}
+    title: Dune
+    author: Frank Herbert
+  - ref: {value: book_dune_messiah}
+    title: Dune Messiah
+    author: Frank Herbert
+  total: 3
+  returned: 2
+  truncated: true
+  next_cursor: book_dune_messiah
 next_actions:
-  items: [{rel: inspect, command: [./examples/bookstore, books, inspect, --book, book_dune], operation: books.inspect, bound: {book: book_dune}}]
-  total: 1
-  returned: 1
+  items:
+  - rel: inspect
+    description: Inspect the first returned book
+    command: [./examples/bookstore, books, inspect, --book, book_dune]
+    operation: books.inspect
+    bound: {book: book_dune}
+    slots: {}
+  - rel: next-page
+    description: Continue this search
+    command: [./examples/bookstore, books, search, --query, dune, --cursor, book_dune_messiah, --limit, '2']
+    operation: books.search
+    bound: {query: dune, cursor: book_dune_messiah, limit: 2}
+    slots: {}
+  total: 2
+  returned: 2
   truncated: false
 ```
 
