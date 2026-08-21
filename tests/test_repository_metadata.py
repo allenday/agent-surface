@@ -95,7 +95,10 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "agent-surface-authoring/reference.md",
     ):
         assert required in normalized
-    assert "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_3" not in normalized
+    old_hateoas_url = (
+        "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_3"
+    )
+    assert old_hateoas_url not in normalized
     assert "hello_mcp.py" not in normalized
     assert len(readme.splitlines()) <= 260
 
