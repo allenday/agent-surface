@@ -13,7 +13,21 @@ encodings.
 Define an operation once with Pydantic; project it as a YAML-first Click CLI and native MCP tools
 with bounded, concrete `next_actions`.
 
-## In 30 seconds
+## Get up and running in 5 seconds
+
+Install the general-purpose `agent-friendly-cli-design` for building HATEOAS CLI tools, generally, and the `agent-surface-authoring` for building with this `agent-surface` project, specifically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/install.sh
+```
+
+Then tell your agent to load the `agent-surface-authoring` to get started building a HATEOAS CLI or MCP tool.
+
+Followup: Read the skill files directly.
+- [agent-friendly-cli-design/SKILL.md](src/agent_surface/skills/agent-friendly-cli-design/SKILL.md)
+- [agent-surface-authoring/SKILL.md](src/agent_surface/skills/agent-surface-authoring/SKILL.md)
+
+## In 30 more seconds
 
 Save this as `hello.py`:
 
@@ -136,36 +150,6 @@ search → inspect → reserve → cancel → delete trajectory is in the
   [references and actions](docs/how-to/references-and-actions.md) when your domain needs them.
 - **Connect an agent.** Follow the [bookstore MCP integration](docs/tutorials/bookstore.md#connect-codex-and-claude-code),
   [MCP contract](docs/reference/mcp-contract.md), and [CLI contract](docs/reference/cli-contract.md).
-
-## Author a surface with the skill
-
-Use the portable `agent-friendly-cli-design` skill to design an agent-first CLI in any stack:
-
-```bash
-mkdir -p ~/.codex/skills/agent-friendly-cli-design
-curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-friendly-cli-design/SKILL.md \
-  -o ~/.codex/skills/agent-friendly-cli-design/SKILL.md
-curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-friendly-cli-design/reference.md \
-  -o ~/.codex/skills/agent-friendly-cli-design/reference.md
-```
-
-On the next Codex turn, ask it to use `agent-friendly-cli-design` to author a new surface. Read the
-[SKILL.md](src/agent_surface/skills/agent-friendly-cli-design/SKILL.md) directly for the durable
-command, envelope, discovery, output-budget, and next-action contracts it teaches.
-
-When building with this package, also install the companion recipe:
-
-```bash
-mkdir -p ~/.codex/skills/agent-surface-authoring
-curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-surface-authoring/SKILL.md \
-  -o ~/.codex/skills/agent-surface-authoring/SKILL.md
-curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-surface-authoring/reference.md \
-  -o ~/.codex/skills/agent-surface-authoring/reference.md
-```
-
-On the next turn, ask Codex to use `agent-surface-authoring`; it applies the shared principles to
-Pydantic, `App`, Click, MCP, references, actions, and package verification. Its
-[SKILL.md](src/agent_surface/skills/agent-surface-authoring/SKILL.md) is shipped with the package.
 
 ## Principles
 
