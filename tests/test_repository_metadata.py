@@ -27,6 +27,12 @@ def test_python_tooling_uses_the_declared_minimum_version() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["tool"]["ruff"]["target-version"] == "py312"
     assert project["tool"]["mypy"]["python_version"] == "3.12"
+    assert project["project"]["classifiers"] == [
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+    ]
 
 
 def test_project_metadata_points_to_its_public_repository() -> None:
@@ -76,9 +82,25 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "docs/concepts/hateoas.md",
         "docs/how-to/adopt-an-existing-app.md",
         "docs/reference/mcp-contract.md",
+        "hello_mcp.py",
+        "~/.codex/config.toml",
+        '"mcpservers"',
+        "mkdir -p ~/.codex/skills/agent-friendly-cli-design",
+        "curl -fssl",
+        "agent-friendly-cli-design/reference.md",
+        "agent-surface-authoring",
+        "agent-surface-authoring/skill.md",
+        "agent-surface-authoring/reference.md",
     ):
         assert required in normalized
-    assert len(readme.splitlines()) <= 200
+    assert len(readme.splitlines()) <= 260
+
+    promise = normalized.index("typed python operations that become")
+    show_and_tell = normalized.index("class greetrequest")
+    install_and_run = normalized.index("pip install 'agent-surface[mcp]'")
+    mcp_configuration = normalized.index("~/.codex/config.toml")
+    skill_installation = normalized.index("mkdir -p ~/.codex/skills/agent-friendly-cli-design")
+    assert promise < show_and_tell < install_and_run < mcp_configuration < skill_installation
 
 
 def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:

@@ -15,11 +15,7 @@ with bounded, concrete `next_actions`.
 
 ## In 30 seconds
 
-Install the package, then save this as `hello.py`:
-
-```bash
-pip install 'agent-surface[mcp]'
-```
+Save this as `hello.py`:
 
 ```python
 from pydantic import BaseModel
@@ -52,13 +48,54 @@ if __name__ == "__main__":
     cli()
 ```
 
+Install it and run the command:
+
 ```bash
+pip install 'agent-surface[mcp]'
 python hello.py people greet --name Ada
 ```
 
 The same typed operation is now callable from Python, exposed through Click, and available as the
-exact MCP tool `people.greet`. Mount `cli` in an existing Click application, run `mcp` over stdio,
-or obtain its Streamable HTTP ASGI application.
+exact MCP tool `people.greet`.
+
+## Use it from MCP
+
+For a local client, use **stdio**: the client starts a Python process and exchanges MCP messages
+over its standard input and output. Save this beside `hello.py` as `hello_mcp.py`:
+
+```python
+import asyncio
+
+from hello import mcp
+
+asyncio.run(mcp.run_stdio())
+```
+
+Add this to `~/.codex/config.toml`, replacing both absolute paths with yours. `python` must be the
+interpreter where you installed `agent-surface`:
+
+```toml
+[mcp_servers.hello]
+command = "/absolute/path/to/.venv/bin/python"
+args = ["/absolute/path/to/hello_mcp.py"]
+```
+
+Restart Codex, then use `/mcp` to inspect `hello`. For Claude Code, save the equivalent
+project-local `.mcp.json` next to `hello.py`:
+
+```json
+{
+  "mcpServers": {
+    "hello": {
+      "command": "/absolute/path/to/.venv/bin/python",
+      "args": ["/absolute/path/to/hello_mcp.py"]
+    }
+  }
+}
+```
+
+Streamable HTTP is for serving MCP remotely from a web application; it is not needed for this
+local setup. See the [MCP contract](docs/reference/mcp-contract.md) when you need that deployment.
 
 ## Why HATEOAS matters here
 
@@ -94,11 +131,35 @@ search → inspect → reserve → cancel → delete trajectory is in the
 - **Connect an agent.** Follow the [bookstore MCP integration](docs/tutorials/bookstore.md#connect-codex-and-claude-code),
   [MCP contract](docs/reference/mcp-contract.md), and [CLI contract](docs/reference/cli-contract.md).
 
-## For coding agents
+## Author a surface with the skill
 
-Give an agent the shipped [agent-friendly CLI design instructions](src/agent_surface/skills/agent-friendly-cli-design/SKILL.md).
-They define the durable command, envelope, discovery, output-budget, and next-action contracts the
-package is designed to uphold.
+Use the portable `agent-friendly-cli-design` skill to design an agent-first CLI in any stack:
+
+```bash
+mkdir -p ~/.codex/skills/agent-friendly-cli-design
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-friendly-cli-design/SKILL.md \
+  -o ~/.codex/skills/agent-friendly-cli-design/SKILL.md
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-friendly-cli-design/reference.md \
+  -o ~/.codex/skills/agent-friendly-cli-design/reference.md
+```
+
+On the next Codex turn, ask it to use `agent-friendly-cli-design` to author a new surface. Read the
+[SKILL.md](src/agent_surface/skills/agent-friendly-cli-design/SKILL.md) directly for the durable
+command, envelope, discovery, output-budget, and next-action contracts it teaches.
+
+When building with this package, also install the companion recipe:
+
+```bash
+mkdir -p ~/.codex/skills/agent-surface-authoring
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-surface-authoring/SKILL.md \
+  -o ~/.codex/skills/agent-surface-authoring/SKILL.md
+curl -fsSL https://raw.githubusercontent.com/allenday/agent-surface/main/src/agent_surface/skills/agent-surface-authoring/reference.md \
+  -o ~/.codex/skills/agent-surface-authoring/reference.md
+```
+
+On the next turn, ask Codex to use `agent-surface-authoring`; it applies the shared principles to
+Pydantic, `App`, Click, MCP, references, actions, and package verification. Its
+[SKILL.md](src/agent_surface/skills/agent-surface-authoring/SKILL.md) is shipped with the package.
 
 ## Principles
 

@@ -4,12 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-surface"
-version = "0.1.0"
+version = "0.1.1"
 description = "Project typed Python operations as agent-friendly CLIs, MCP tools, and schemas"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Allen Day" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
   "click>=8.1,<9",
   "pydantic>=2.11,<3",
