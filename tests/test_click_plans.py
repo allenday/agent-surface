@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, StrictInt, create_model
 
 from agent_surface import App, ReferenceRegistry
 from agent_surface.adapters.click import CliDefinitionError, CliPlanCompiler
@@ -77,6 +77,77 @@ def test_explicit_argument_metadata_changes_only_the_declared_field() -> None:
     assert fields[0].kind == "argument"
     assert fields[0].parameter_decls == ("book",)
     assert fields[1].kind == "option"
+
+
+def test_sensitive_string_field_can_be_projected_from_stdin() -> None:
+    class StdinRequest(BaseModel):
+        host: str
+        bws_token: str = Field(
+            min_length=1,
+            json_schema_extra={
+                "sensitive": True,
+                "cli": {
+                    "source": "stdin",
+                    "max_bytes": 8_192,
+                    "strip_trailing_newline": True,
+                },
+            },
+        )
+
+    fields = CliPlanCompiler(app_for(StdinRequest).operations).compile()[0].fields
+    token = fields[1]
+
+    assert token.source == "stdin"
+    assert token.parameter_decls == ()
+    assert token.stdin_flag == "--bws-token-stdin"
+    assert token.stdin_max_bytes == 8_192
+    assert token.strip_trailing_newline is True
+
+
+@pytest.mark.parametrize(
+    "request_model",
+    [
+        create_model(
+            "InsecureStdinRequest",
+            bws_token=(str, Field(json_schema_extra={"cli": {"source": "stdin"}})),
+        ),
+        create_model(
+            "TwoStdinFieldsRequest",
+            first=(
+                str,
+                Field(
+                    json_schema_extra={"sensitive": True, "cli": {"source": "stdin"}}
+                ),
+            ),
+            second=(
+                str,
+                Field(
+                    json_schema_extra={"sensitive": True, "cli": {"source": "stdin"}}
+                ),
+            ),
+        ),
+    ],
+)
+def test_stdin_field_metadata_rejects_unsafe_or_ambiguous_shapes(
+    request_model: type[BaseModel],
+) -> None:
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app_for(request_model).operations).compile()
+
+    assert raised.value.code == "cli_parameter_conflict"
+
+
+def test_stdin_presence_flag_cannot_collide_with_an_argv_option() -> None:
+    class CollidingRequest(BaseModel):
+        token: str = Field(
+            json_schema_extra={"sensitive": True, "cli": {"source": "stdin"}}
+        )
+        token_stdin: str
+
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app_for(CollidingRequest).operations).compile()
+
+    assert raised.value.code == "cli_parameter_conflict"
 
 
 def test_registered_exact_reference_type_compiles_as_reference() -> None:

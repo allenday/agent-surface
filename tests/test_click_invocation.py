@@ -268,6 +268,79 @@ def test_sensitive_positional_value_is_redacted_from_raw_argv() -> None:
     assert document["command"]["raw"][-3] == "<redacted>"
 
 
+def stdin_app() -> App:
+    class Request(BaseModel):
+        host: str
+        bws_token: str = Field(
+            min_length=1,
+            json_schema_extra={
+                "sensitive": True,
+                "cli": {"source": "stdin", "max_bytes": 64, "strip_trailing_newline": True},
+            },
+        )
+
+    app = App("bootstrap")
+
+    @app.operation("host.bootstrap")
+    def bootstrap(request: Request) -> EchoResult:
+        return EchoResult(message=f"bootstrapped {request.host}")
+
+    return app
+
+
+def invoke_stdin(args: list[str], *, input: str | bytes) -> tuple[object, dict[str, object]]:
+    command = ClickAdapter(stdin_app()).command()
+    result = CliRunner().invoke(command, [*args, "--format", "json"], input=input)
+    return result, json.loads(result.stdout)
+
+
+def test_sensitive_stdin_field_is_absent_from_argv_and_redacted_from_output() -> None:
+    result, document = invoke_stdin(
+        ["host", "bootstrap", "--host", "node-1", "--bws-token-stdin"],
+        input="consumer-secret\n",
+    )
+
+    assert result.exit_code == 0
+    assert document["result"] == {"message": "bootstrapped node-1"}
+    assert "consumer-secret" not in result.output
+    assert "--bws-token" not in document["command"]["raw"]
+    assert document["command"]["parsed"]["flags"] == ["bws-token-stdin"]
+
+
+@pytest.mark.parametrize(
+    ("input", "code"),
+    [
+        ("", "stdin_missing"),
+        ("\n", "stdin_empty"),
+        ("first\nsecond\n", "stdin_multiple_values"),
+        ("x" * 65, "stdin_too_large"),
+    ],
+)
+def test_sensitive_stdin_field_rejects_invalid_single_value_input(
+    input: str,
+    code: str,
+) -> None:
+    result, document = invoke_stdin(
+        ["host", "bootstrap", "--host", "node-1", "--bws-token-stdin"],
+        input=input,
+    )
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == code
+    if value := input.strip():
+        assert value not in result.output
+
+
+def test_sensitive_stdin_field_rejects_non_utf8_input() -> None:
+    result, document = invoke_stdin(
+        ["host", "bootstrap", "--host", "node-1", "--bws-token-stdin"],
+        input=b"\xff",
+    )
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "stdin_invalid_encoding"
+
+
 def test_sensitive_bad_lexical_value_is_redacted_from_parse_error() -> None:
     class Request(BaseModel):
         pin: int = Field(json_schema_extra={"sensitive": True})

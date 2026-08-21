@@ -26,6 +26,40 @@ parsed view stays shallow and close to parser truth. For a generated group mount
 consumer-owned Click root, supply `argv_provider` to preserve parent options that Click consumed
 before dispatching into the group.
 
+## Sensitive stdin fields
+
+A sensitive singular string field may opt into one bounded stdin value for the Click projection:
+
+```python
+bws_token: str = Field(
+    min_length=1,
+    json_schema_extra={
+        "sensitive": True,
+        "cli": {
+            "source": "stdin",
+            "max_bytes": 8192,
+            "strip_trailing_newline": True,
+        },
+    },
+)
+```
+
+The generated CLI omits `--bws-token`; it requires the explicit presence flag
+`--bws-token-stdin` instead:
+
+```bash
+printf '%s\n' "$BWS_TOKEN" | app host bootstrap HOST --bws-token-stdin
+```
+
+The adapter accepts at most `max_bytes` input bytes in one bounded read. It accepts one UTF-8 value with at most one
+trailing newline; `stdin_missing`, `stdin_empty`, `stdin_multiple_values`, `stdin_too_large`, and
+`stdin_invalid_encoding` are structured exit-code-2 errors. The value never appears in argv,
+command envelopes, generated actions, or rendered errors. Only one stdin-sourced field is allowed
+per operation.
+
+This is a Click-only input source. MCP continues to expose `bws_token` as the ordinary typed
+request field, and its normal sensitive-value redaction applies.
+
 ## Exit codes
 
 | Code | Meaning |

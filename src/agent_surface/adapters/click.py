@@ -32,12 +32,14 @@ from agent_surface.rendering import RenderOptions, render, render_envelope
 
 CliParameterKind = Literal["argument", "option"]
 CliValueKind = Literal["boolean", "float", "integer", "path", "reference", "string"]
+CliFieldSource = Literal["argv", "stdin"]
 
 _RESERVED_ROOTS = frozenset({"actions", "operations"})
 _RESERVED_FIELDS = frozenset({"format", "yaml_style"})
 _RAW_ARGV_KEY = "agent_surface.raw_argv"
 _REDACTED = "<redacted>"
 _MIN_CLI_BYTES = 1_024
+_DEFAULT_STDIN_MAX_BYTES = 8_192
 
 
 class CliDefinitionError(Exception):
@@ -62,6 +64,10 @@ class CliFieldPlan:
     help: str = ""
     sensitive: bool = False
     reference_type: type[Any] | None = None
+    source: CliFieldSource = "argv"
+    stdin_flag: str | None = None
+    stdin_max_bytes: int | None = None
+    strip_trailing_newline: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +137,46 @@ class CliPlanCompiler:
         kind = cli_extra.get("kind", "option")
         if kind not in ("argument", "option"):
             raise self._unsupported(name, f"unknown CLI parameter kind {kind!r}")
-        parameter_decls = (name,) if kind == "argument" else (f"--{name.replace('_', '-')}",)
+        source = cli_extra.get("source", "argv")
+        if source not in ("argv", "stdin"):
+            raise self._unsupported(name, f"unknown CLI field source {source!r}")
+        sensitive = extra.get("sensitive") is True
+        stdin_max_bytes: int | None = None
+        strip_trailing_newline = True
+        if source == "stdin":
+            if not sensitive:
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    f"stdin field {name} must be sensitive",
+                    fix="Mark the field sensitive or project it from argv.",
+                )
+            if kind != "option" or multiple or value_kind != "string":
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    f"stdin field {name} must be a singular string option",
+                    fix="Use a sensitive str field without cli.kind or a collection annotation.",
+                )
+            candidate_max_bytes = cli_extra.get("max_bytes", _DEFAULT_STDIN_MAX_BYTES)
+            if type(candidate_max_bytes) is not int or candidate_max_bytes < 1:
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    f"stdin field {name} max_bytes must be a positive integer",
+                    fix="Set cli.max_bytes to a positive integer.",
+                )
+            candidate_strip = cli_extra.get("strip_trailing_newline", True)
+            if type(candidate_strip) is not bool:
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    f"stdin field {name} strip_trailing_newline must be boolean",
+                    fix="Set cli.strip_trailing_newline to true or false.",
+                )
+            stdin_max_bytes = candidate_max_bytes
+            strip_trailing_newline = candidate_strip
+        parameter_decls = (
+            ()
+            if source == "stdin"
+            else (name,) if kind == "argument" else (f"--{name.replace('_', '-')}",)
+        )
         return CliFieldPlan(
             name=name,
             parameter_decls=parameter_decls,
@@ -142,8 +187,12 @@ class CliPlanCompiler:
             multiple=multiple,
             choices=choices,
             help=field.description or "",
-            sensitive=extra.get("sensitive") is True,
+            sensitive=sensitive,
             reference_type=reference_type,
+            source=source,
+            stdin_flag=f"--{name.replace('_', '-')}-stdin" if source == "stdin" else None,
+            stdin_max_bytes=stdin_max_bytes,
+            strip_trailing_newline=strip_trailing_newline,
         )
 
     def _value_shape(
@@ -222,7 +271,33 @@ class CliPlanCompiler:
         definition: OperationDefinition,
         fields: tuple[CliFieldPlan, ...],
     ) -> None:
+        stdin_fields = tuple(field for field in fields if field.source == "stdin")
+        if len(stdin_fields) > 1:
+            raise CliDefinitionError(
+                "cli_parameter_conflict",
+                f"Operation {definition.name} declares multiple stdin fields",
+                fix="Project at most one field from stdin for a CLI invocation.",
+            )
+        stdin_flags = {
+            field.stdin_flag: field
+            for field in stdin_fields
+            if field.stdin_flag is not None
+        }
         for field in fields:
+            if (
+                field.source == "argv"
+                and field.kind == "option"
+                and field.parameter_decls[0] in stdin_flags
+            ):
+                stdin_field = stdin_flags[field.parameter_decls[0]]
+                raise CliDefinitionError(
+                    "cli_parameter_conflict",
+                    (
+                        f"Option {field.parameter_decls[0]} for {field.name} conflicts with "
+                        f"the generated stdin flag for {stdin_field.name}"
+                    ),
+                    fix="Rename one field or project the other field from a different source.",
+                )
             if field.name in _RESERVED_FIELDS:
                 raise CliDefinitionError(
                     "cli_parameter_conflict",
@@ -603,7 +678,9 @@ class ClickAdapter:
                 else None,
             )
             for field in plan.fields
+            if field.source == "argv"
         ]
+        parameters.extend(_stdin_parameters(plan.fields))
         if plan.destructive and not any(field.name == "confirm" for field in plan.fields):
             parameters.append(
                 click.Option(
@@ -641,6 +718,15 @@ class ClickAdapter:
         )
         try:
             payload = self._payload(context, plan, params)
+        except OperationError as error:
+            self._emit_error(
+                command,
+                error,
+                exit_code=2,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+            )
         except ReferenceError as error:
             self._emit_error(
                 command,
@@ -765,6 +851,13 @@ class ClickAdapter:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         for field in plan.fields:
+            if field.source == "stdin":
+                if not params[_stdin_parameter_name(field)]:
+                    continue
+                value = _read_stdin_field(field)
+                params[field.name] = value
+                payload[field.name] = value
+                continue
             if context.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
                 continue
             value = params[field.name]
@@ -785,6 +878,10 @@ class ClickAdapter:
         options: dict[str, Any] = {}
         flags = []
         for field in plan.fields:
+            if field.source == "stdin":
+                if params[_stdin_parameter_name(field)]:
+                    flags.append(f"{field.name.replace('_', '-')}-stdin")
+                continue
             if context.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
                 continue
             value = _REDACTED if field.sensitive else params[field.name]
@@ -1149,7 +1246,7 @@ def _redact_raw(raw: tuple[str, ...], plan: CliCommandPlan) -> tuple[str, ...]:
     sensitive_values = frozenset(_sensitive_raw_values(raw, plan))
     redacted = tuple(_REDACTED if token in sensitive_values else token for token in raw)
     for field in plan.fields:
-        if not field.sensitive or field.kind != "option":
+        if field.source != "argv" or not field.sensitive or field.kind != "option":
             continue
         option = field.parameter_decls[0]
         redacted = tuple(
@@ -1166,7 +1263,7 @@ def _sensitive_raw_values(
     options = {
         field.parameter_decls[0]: field
         for field in plan.fields
-        if field.kind == "option"
+        if field.source == "argv" and field.kind == "option"
     }
     arguments = tuple(field for field in plan.fields if field.kind == "argument")
     values: list[str] = []
@@ -1286,6 +1383,71 @@ def _click_parameter(
         show_default=False,
         **option_kwargs,
     )
+
+
+def _stdin_parameters(fields: tuple[CliFieldPlan, ...]) -> list[click.Option]:
+    parameters = []
+    for field in fields:
+        if field.source != "stdin":
+            continue
+        assert field.stdin_flag is not None  # compiler validates stdin field plans
+        parameters.append(
+            click.Option(
+                (field.stdin_flag, _stdin_parameter_name(field)),
+                is_flag=True,
+                default=False,
+                required=field.required,
+                help=f"Read sensitive {field.name} from standard input.",
+            )
+        )
+    return parameters
+
+
+def _stdin_parameter_name(field: CliFieldPlan) -> str:
+    return f"_surface_stdin_{field.name}"
+
+
+def _read_stdin_field(field: CliFieldPlan) -> str:
+    assert field.stdin_max_bytes is not None  # compiler validates stdin field plans
+    value = click.get_binary_stream("stdin").read(field.stdin_max_bytes + 1)
+    if not value:
+        raise OperationError(
+            "stdin_missing",
+            f"No value was provided on stdin for {field.name}",
+            fix=f"Pipe one value and retry with {field.stdin_flag}.",
+        )
+    if len(value) > field.stdin_max_bytes:
+        raise OperationError(
+            "stdin_too_large",
+            f"Stdin value for {field.name} exceeds {field.stdin_max_bytes} bytes",
+            fix="Pipe a smaller single value or raise cli.max_bytes deliberately.",
+        )
+
+    normalized = value
+    if normalized.endswith(b"\n"):
+        normalized = normalized[:-1]
+        if normalized.endswith(b"\r"):
+            normalized = normalized[:-1]
+    if b"\n" in normalized or b"\r" in normalized:
+        raise OperationError(
+            "stdin_multiple_values",
+            f"Stdin for {field.name} must contain exactly one value",
+            fix="Pipe one value followed by at most one trailing newline.",
+        )
+    if not normalized:
+        raise OperationError(
+            "stdin_empty",
+            f"Stdin value for {field.name} is empty",
+            fix="Pipe one non-empty value and retry.",
+        )
+    try:
+        return (normalized if field.strip_trailing_newline else value).decode("utf-8")
+    except UnicodeDecodeError:
+        raise OperationError(
+            "stdin_invalid_encoding",
+            f"Stdin value for {field.name} must be UTF-8 text",
+            fix="Pipe UTF-8 text and retry.",
+        ) from None
 
 
 def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:

@@ -157,6 +157,16 @@ def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:
     ):
         assert required in contract
 
+    cli_contract = (ROOT / "docs" / "reference" / "cli-contract.md").read_text()
+    for required in (
+        '"source": "stdin"',
+        "--bws-token-stdin",
+        "stdin_missing",
+        "stdin_multiple_values",
+        "MCP",
+    ):
+        assert required in cli_contract
+
 
 def test_bookstore_docs_cover_persistent_crud_and_local_mcp_clients() -> None:
     tutorial = (ROOT / "docs" / "tutorials" / "bookstore.md").read_text()

@@ -56,6 +56,28 @@ async def test_native_tools_preserve_names_schemas_and_annotations() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stdin_cli_metadata_does_not_change_the_mcp_input_schema() -> None:
+    class BootstrapRequest(BaseModel):
+        bws_token: str = Field(
+            min_length=1,
+            json_schema_extra={"sensitive": True, "cli": {"source": "stdin"}},
+        )
+
+    app = App("bootstrap")
+
+    @app.operation("host.bootstrap")
+    def bootstrap(request: BootstrapRequest) -> SearchResult:
+        return SearchResult(count=len(request.bws_token))
+
+    async with Client(MCPAdapter(app).server, raise_exceptions=True) as client:
+        page = await client.list_tools()
+        result = await client.call_tool("host.bootstrap", {"bws_token": "consumer-secret"})
+
+    assert page.tools[0].input_schema["properties"]["bws_token"]["minLength"] == 1
+    assert result.structured_content["result"] == {"count": 15}
+
+
+@pytest.mark.asyncio
 async def test_tool_discovery_is_deterministic_and_cursor_paginated() -> None:
     adapter = MCPAdapter(catalog_app(400), page_size=20)
     names: list[str] = []
