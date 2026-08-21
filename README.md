@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/agent-surface.svg)](https://pypi.org/project/agent-surface/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Typed Python operations that become [HATEOAS](https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_3)
+Typed Python operations that become [HATEOAS](https://en.wikipedia.org/wiki/HATEOAS)
 CLI and [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) surfaces—so people and
 agents can discover and take the next valid action without guessing commands, routes, or object
 encodings.
@@ -18,6 +18,9 @@ with bounded, concrete `next_actions`.
 Save this as `hello.py`:
 
 ```python
+import asyncio
+import sys
+
 from pydantic import BaseModel
 
 from agent_surface import App
@@ -45,7 +48,10 @@ cli = build_click_group(app)
 mcp = MCPAdapter(app)
 
 if __name__ == "__main__":
-    cli()
+    if sys.argv[1:] == ["--mcp"]:
+        asyncio.run(mcp.run_stdio())
+    else:
+        cli()
 ```
 
 Install it and run the command:
@@ -60,16 +66,8 @@ exact MCP tool `people.greet`.
 
 ## Use it from MCP
 
-For a local client, use **stdio**: the client starts a Python process and exchanges MCP messages
-over its standard input and output. Save this beside `hello.py` as `hello_mcp.py`:
-
-```python
-import asyncio
-
-from hello import mcp
-
-asyncio.run(mcp.run_stdio())
-```
+For a local client, use **stdio**: the client starts `hello.py --mcp` and exchanges MCP messages
+over its standard input and output.
 
 Add this to `~/.codex/config.toml`, replacing both absolute paths with yours. `python` must be the
 interpreter where you installed `agent-surface`:
@@ -77,7 +75,7 @@ interpreter where you installed `agent-surface`:
 ```toml
 [mcp_servers.hello]
 command = "/absolute/path/to/.venv/bin/python"
-args = ["/absolute/path/to/hello_mcp.py"]
+args = ["/absolute/path/to/hello.py", "--mcp"]
 ```
 
 Restart Codex, then use `/mcp` to inspect `hello`. For Claude Code, save the equivalent
@@ -88,7 +86,7 @@ project-local `.mcp.json` next to `hello.py`:
   "mcpServers": {
     "hello": {
       "command": "/absolute/path/to/.venv/bin/python",
-      "args": ["/absolute/path/to/hello_mcp.py"]
+      "args": ["/absolute/path/to/hello.py", "--mcp"]
     }
   }
 }

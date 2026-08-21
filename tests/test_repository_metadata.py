@@ -70,7 +70,7 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
 
     for required in (
         "hateoas",
-        "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_3",
+        "https://en.wikipedia.org/wiki/hateoas",
         "https://modelcontextprotocol.io/docs/getting-started/intro",
         "30 seconds",
         "agent-surface[mcp]",
@@ -82,7 +82,9 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "docs/concepts/hateoas.md",
         "docs/how-to/adopt-an-existing-app.md",
         "docs/reference/mcp-contract.md",
-        "hello_mcp.py",
+        "hello.py --mcp",
+        'sys.argv[1:] == ["--mcp"]',
+        "asyncio.run(mcp.run_stdio())",
         "~/.codex/config.toml",
         '"mcpservers"',
         "mkdir -p ~/.codex/skills/agent-friendly-cli-design",
@@ -93,6 +95,8 @@ def test_readme_is_a_concise_human_first_hateoas_entry_point() -> None:
         "agent-surface-authoring/reference.md",
     ):
         assert required in normalized
+    assert "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_3" not in normalized
+    assert "hello_mcp.py" not in normalized
     assert len(readme.splitlines()) <= 260
 
     promise = normalized.index("typed python operations that become")
