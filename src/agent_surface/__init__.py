@@ -28,6 +28,7 @@ from agent_surface.contracts import (
     SuccessEnvelope,
     SuccessOutcome,
 )
+from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation
 from agent_surface.operations import OperationError
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
 from agent_surface.references import (
@@ -56,6 +57,7 @@ __all__ = [
     "AllowActions",
     "App",
     "BoundedCollection",
+    "CanonicalEnvelopeRenderer",
     "CommandView",
     "DuplicateReferenceCodec",
     "DenyAllActions",
@@ -64,6 +66,7 @@ __all__ = [
     "ErrorOutcome",
     "InvalidReference",
     "InvalidActionCursor",
+    "Invocation",
     "MissingReferenceCodec",
     "OperationError",
     "NoActions",

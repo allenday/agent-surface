@@ -32,7 +32,8 @@ cursors are rejected rather than guessed.
 Calls dispatch directly through `OperationRegistry.invoke()`, so sync and async handlers share the
 same validation and output checks as direct Python and Click invocation.
 
-The authoritative result is MCP `structuredContent`. A success has:
+The authoritative result is MCP `structuredContent`. Without an application-owned canonical
+envelope renderer, a success has:
 
 ```yaml
 {schema_version: '1', ok: true, result: {}, next_actions: {items: [], total: 0, returned: 0, truncated: false}}
@@ -43,6 +44,12 @@ guidance, and bounded `next_actions` in `structuredContent`. Unexpected exceptio
 `internal_error`; private exception text is not exposed. A text content item carries a bounded YAML
 rendering of the same public outcome for compatibility with clients that do not display structured
 content.
+
+When `MCPAdapter(..., envelope_renderer=renderer)` is configured, `renderer.output_model` is the
+tool output schema and `structuredContent` is the document produced from the operation, validated
+public request view, outcome, bounded action frontier, and output budget. Sensitive input fields
+are redacted before the view reaches the renderer. Use the same renderer for
+`ClickAdapter` to retain one application-owned response normal form across both transports.
 
 References are decoded only through an explicitly registered `ReferenceCodec`; incidental
 `str(object)` conversion is never used. An exact registered reference field is advertised as a

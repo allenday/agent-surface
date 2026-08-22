@@ -13,12 +13,14 @@ from typing import Any, Literal, get_args, get_origin
 
 import click
 from click.core import ParameterSource
+from pydantic import BaseModel
 
 from agent_surface.actions import InvalidActionCursor
 from agent_surface.app import App
 from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
 from agent_surface.contracts import CommandView, ErrorEnvelope, ParsedCommand, SuccessEnvelope
 from agent_surface.discovery import OperationCatalog
+from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
 from agent_surface.operations import (
     OperationDefinition,
     OperationError,
@@ -340,6 +342,7 @@ class ClickAdapter:
         action_provider: ActionProvider | None = None,
         render_options: RenderOptions | None = None,
         argv_provider: Callable[[], Sequence[str]] | None = None,
+        envelope_renderer: CanonicalEnvelopeRenderer | None = None,
     ) -> None:
         self._app = app
         self._references = references or ReferenceRegistry()
@@ -352,6 +355,7 @@ class ClickAdapter:
                 fix="Raise max_bytes so a structured error envelope can always be emitted.",
             )
         self._argv_provider = argv_provider
+        self._envelope_renderer = envelope_renderer
         self._plans = CliPlanCompiler(
             app.operations,
             references=self._references,
@@ -716,6 +720,8 @@ class ClickAdapter:
             params,
             transport_confirm=transport_confirm,
         )
+        definition = self._app.operations.describe(plan.operation)
+        request: Any | None = None
         try:
             payload = self._payload(context, plan, params)
         except OperationError as error:
@@ -726,6 +732,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
         except ReferenceError as error:
             self._emit_error(
@@ -735,6 +743,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
         except Exception:
             self._emit_error(
@@ -748,6 +758,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
 
         confirmed = transport_confirm or payload.get("confirm") is True
@@ -763,22 +775,47 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
 
         try:
-            result = asyncio.run(self._app.operations.invoke(plan.operation, payload))
+            request = self._app.operations.validate(definition, payload)
+            result = asyncio.run(self._app.operations.invoke_request(definition, request))
             actions = self._action_provider.actions_for(
                 operation=plan.operation,
                 result=result,
             )
-            envelope = SuccessEnvelope(
-                command=command,
-                result=result,
-                next_actions=actions,
-            )
+            envelope: BaseModel
+            if self._envelope_renderer is None:
+                envelope = SuccessEnvelope(
+                    command=command,
+                    result=result,
+                    next_actions=actions,
+                )
+            else:
+                envelope = self._envelope_renderer.output_model.model_validate(
+                    self._envelope_renderer.render(
+                        Invocation(
+                            operation=definition,
+                            request=public_request(definition, request),
+                            result=result,
+                            error=None,
+                            next_actions=actions,
+                            budget=self._selected_render_options(
+                                document_format, yaml_style
+                            ).budget,
+                            command=command,
+                        )
+                    )
+                )
             click.echo(
                 render(
-                    envelope,
+                    (
+                        envelope.model_dump(mode="json", exclude_none=False)
+                        if self._envelope_renderer is not None
+                        else envelope
+                    ),
                     options=self._selected_render_options(document_format, yaml_style),
                 ),
                 nl=False,
@@ -796,6 +833,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
         except OperationOutputError as error:
             self._emit_error(
@@ -805,6 +844,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
         except OperationError as error:
             self._emit_error(
@@ -819,6 +860,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
         except OutputBudgetExceeded as error:
             self._emit_error(
@@ -828,6 +871,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
         except Exception:
             self._emit_error(
@@ -841,6 +886,8 @@ class ClickAdapter:
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
+                definition=definition,
+                request=request,
             )
 
     def _payload(
@@ -913,6 +960,8 @@ class ClickAdapter:
         operation: str = "",
         document_format: str,
         yaml_style: str,
+        definition: OperationDefinition | None = None,
+        request: BaseModel | None = None,
     ) -> typing.Never:
         try:
             actions = self._action_provider.actions_for(
@@ -921,6 +970,43 @@ class ClickAdapter:
             )
         except Exception:
             actions = NoActions().actions_for(operation=operation, error=error)
+        if self._envelope_renderer is not None and definition is not None:
+            invocation = Invocation(
+                operation=definition,
+                request=public_request(definition, request) if request is not None else None,
+                result=None,
+                error=error,
+                next_actions=actions,
+                budget=self._selected_render_options(document_format, yaml_style).budget,
+                command=command,
+            )
+            try:
+                envelope = self._envelope_renderer.output_model.model_validate(
+                    self._envelope_renderer.render(invocation)
+                )
+                rendered = render(
+                    envelope.model_dump(mode="json", exclude_none=False),
+                    options=self._selected_render_options(document_format, yaml_style),
+                )
+            except OutputBudgetExceeded as budget_error:
+                error = OperationError(
+                    budget_error.code,
+                    str(budget_error),
+                    details=(budget_error.details,),
+                    fix=budget_error.fix,
+                )
+                envelope = self._envelope_renderer.output_model.model_validate(
+                    self._envelope_renderer.render(invocation.bounded_error(error))
+                )
+                rendered = render(
+                    envelope.model_dump(mode="json", exclude_none=False),
+                    options=self._selected_render_options(document_format, yaml_style),
+                )
+            click.echo(
+                rendered,
+                nl=False,
+            )
+            raise click.exceptions.Exit(exit_code)
         outcome = error_outcome(error, next_actions=actions)
         envelope = ErrorEnvelope(
             command=command,
