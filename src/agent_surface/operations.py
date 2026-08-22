@@ -122,12 +122,23 @@ class OperationRegistry:
     def list(self) -> tuple[OperationDefinition, ...]:
         return tuple(self._operations[name] for name in sorted(self._operations))
 
-    async def invoke(self, name: str, payload: Any) -> BaseModel:
-        definition = self.describe(name)
+    def validate(
+        self,
+        definition: OperationDefinition,
+        payload: Any,
+    ) -> BaseModel:
+        """Validate one payload before a sibling transport invokes its handler."""
         try:
-            request = definition.input_model.model_validate(payload)
+            return definition.input_model.model_validate(payload)
         except ValidationError as error:
-            raise OperationInputError(name, error) from error
+            raise OperationInputError(definition.name, error) from error
+
+    async def invoke_request(
+        self,
+        definition: OperationDefinition,
+        request: BaseModel,
+    ) -> BaseModel:
+        """Invoke one already-validated request through the registered handler."""
 
         result = definition.handler(request)
         if inspect.isawaitable(result):
@@ -136,7 +147,12 @@ class OperationRegistry:
         try:
             return definition.output_model.model_validate(result)
         except ValidationError as error:
-            raise OperationOutputError(name, error) from error
+            raise OperationOutputError(definition.name, error) from error
+
+    async def invoke(self, name: str, payload: Any) -> BaseModel:
+        definition = self.describe(name)
+        request = self.validate(definition, payload)
+        return await self.invoke_request(definition, request)
 
 
 __all__ = [

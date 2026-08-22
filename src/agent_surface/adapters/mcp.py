@@ -20,6 +20,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised in subproce
 from agent_surface.app import App
 from agent_surface.budgets import OutputBudgetExceeded
 from agent_surface.contracts import ErrorOutcome, SuccessOutcome
+from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
 from agent_surface.operations import OperationDefinition, OperationError
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
 from agent_surface.references import InvalidReference, ReferenceError, ReferenceRegistry
@@ -45,6 +46,7 @@ class MCPAdapter:
         references: ReferenceRegistry | None = None,
         action_provider: ActionProvider | None = None,
         render_options: RenderOptions | None = None,
+        envelope_renderer: CanonicalEnvelopeRenderer | None = None,
     ) -> None:
         if page_size < 1:
             raise ValueError("page_size must be positive")
@@ -52,6 +54,7 @@ class MCPAdapter:
         self._references = references or ReferenceRegistry()
         self._action_provider = action_provider or NoActions()
         self._render_options = render_options or RenderOptions()
+        self._envelope_renderer = envelope_renderer
         if self._render_options.budget.max_bytes < _MIN_MCP_BYTES:
             raise ValueError(
                 f"MCP output budget must be at least {_MIN_MCP_BYTES} bytes so a "
@@ -124,12 +127,15 @@ class MCPAdapter:
                     fix="Retry with confirm: true after reviewing the target.",
                 ),
                 operation=definition.name,
+                definition=definition,
             )
         if definition.destructive and confirm_field is None:
             arguments.pop("confirm", None)
+        request: Any | None = None
         try:
             arguments = self._decode_references(definition, arguments)
-            result = await self._app.operations.invoke(definition.name, arguments)
+            request = self._app.operations.validate(definition, arguments)
+            result = await self._app.operations.invoke_request(definition, request)
             try:
                 actions = self._action_provider.actions_for(
                     operation=definition.name,
@@ -144,8 +150,20 @@ class MCPAdapter:
                     ),
                     operation=definition.name,
                     include_actions=False,
+                    definition=definition,
+                    request=request,
                 )
-            return self._mcp_result(success_outcome(result, next_actions=actions), is_error=False)
+            return self._mcp_result(
+                Invocation(
+                    operation=definition,
+                    request=public_request(definition, request),
+                    result=result,
+                    error=None,
+                    next_actions=actions,
+                    budget=self._render_options.budget,
+                ),
+                is_error=False,
+            )
         except ReferenceError as error:
             return self._error_result(
                 self._redact_error(
@@ -154,11 +172,15 @@ class MCPAdapter:
                     params.arguments or {},
                 ),
                 operation=definition.name,
+                definition=definition,
+                request=request,
             )
         except OperationError as error:
             return self._error_result(
                 self._redact_error(error, definition, params.arguments or {}),
                 operation=definition.name,
+                definition=definition,
+                request=request,
             )
         except Exception:
             return self._error_result(
@@ -169,6 +191,8 @@ class MCPAdapter:
                 ),
                 operation=definition.name,
                 include_actions=False,
+                definition=definition,
+                request=request,
             )
 
     def _decode_references(
@@ -201,12 +225,26 @@ class MCPAdapter:
         *,
         operation: str,
         include_actions: bool = True,
+        definition: OperationDefinition | None = None,
+        request: Any | None = None,
     ) -> types.CallToolResult:
         actions = NoActions().actions_for(operation=operation, error=error)
         if include_actions:
             with suppress(Exception):
                 actions = self._action_provider.actions_for(operation=operation, error=error)
-        return self._mcp_result(error_outcome(error, next_actions=actions), is_error=True)
+        if definition is None:
+            return self._mcp_result(error_outcome(error, next_actions=actions), is_error=True)
+        return self._mcp_result(
+            Invocation(
+                operation=definition,
+                request=public_request(definition, request) if request is not None else None,
+                result=None,
+                error=error,
+                next_actions=actions,
+                budget=self._render_options.budget,
+            ),
+            is_error=True,
+        )
 
     @staticmethod
     def _redact_error(
@@ -254,7 +292,7 @@ class MCPAdapter:
 
     def _mcp_result(
         self,
-        outcome: SuccessOutcome[Any] | ErrorOutcome,
+        outcome: SuccessOutcome[Any] | ErrorOutcome | Invocation,
         *,
         is_error: bool,
     ) -> types.CallToolResult:
@@ -262,8 +300,16 @@ class MCPAdapter:
         try:
             text, document = self._render_payload(selected)
         except OutputBudgetExceeded as error:
-            selected = error_outcome(
-                OperationError(error.code, str(error), details=(error.details,), fix=error.fix)
+            budget_error = OperationError(
+                error.code,
+                str(error),
+                details=(error.details,),
+                fix=error.fix,
+            )
+            selected = (
+                selected.bounded_error(budget_error)
+                if isinstance(selected, Invocation)
+                else error_outcome(budget_error)
             )
             text, document = self._render_payload(selected)
             is_error = True
@@ -275,10 +321,27 @@ class MCPAdapter:
 
     def _render_payload(
         self,
-        outcome: SuccessOutcome[Any] | ErrorOutcome,
+        outcome: SuccessOutcome[Any] | ErrorOutcome | Invocation,
     ) -> tuple[str, dict[str, Any]]:
-        text = render(outcome, options=self._render_options)
-        document = outcome.model_dump(mode="json", exclude_none=True)
+        if isinstance(outcome, Invocation) and self._envelope_renderer is not None:
+            document_model = self._envelope_renderer.output_model.model_validate(
+                self._envelope_renderer.render(outcome)
+            )
+        elif isinstance(outcome, Invocation):
+            document_model = (
+                error_outcome(outcome.error, next_actions=outcome.next_actions)
+                if outcome.error is not None
+                else success_outcome(outcome.result, next_actions=outcome.next_actions)
+            )
+        else:
+            document_model = outcome
+        text = render(document_model, options=self._render_options)
+        document = document_model.model_dump(
+            mode="json",
+            exclude_none=not (
+                isinstance(outcome, Invocation) and self._envelope_renderer is not None
+            ),
+        )
         structured = json.dumps(
             document,
             ensure_ascii=False,
@@ -298,10 +361,12 @@ class MCPAdapter:
         return text, document
 
     def _compile_tool(self, definition: OperationDefinition) -> MCPToolPlan:
-        outcome_model = SuccessOutcome[definition.output_model]  # type: ignore[name-defined]
-        output_schema = outcome_model.model_json_schema(
-            mode="serialization"
+        outcome_model = (
+            self._envelope_renderer.output_model
+            if self._envelope_renderer is not None
+            else SuccessOutcome[definition.output_model]  # type: ignore[name-defined]
         )
+        output_schema = outcome_model.model_json_schema(mode="serialization")
         input_schema = definition.input_model.model_json_schema(mode="validation")
         properties = input_schema.setdefault("properties", {})
         for name, field in definition.input_model.model_fields.items():
