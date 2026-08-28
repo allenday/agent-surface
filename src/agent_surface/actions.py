@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, get_args, get_origin, get_type_hints
 
+from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 from agent_surface.budgets import OutputBudget
@@ -49,6 +50,7 @@ class ActionSlotPlan:
     required: bool
     default: Any = _MISSING
     source: dict[str, Any] | None = None
+    root: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,8 +92,18 @@ def action(
 class ActionCompiler:
     """Compile immutable plans from registered models and explicitly decorated methods."""
 
-    def __init__(self, operations: OperationRegistry) -> None:
+    def __init__(
+        self,
+        operations: OperationRegistry,
+        *,
+        shared_input_model: type[BaseModel] | None = None,
+    ) -> None:
         self._operations = operations
+        self._shared_field_names = (
+            frozenset(shared_input_model.model_fields)
+            if shared_input_model is not None
+            else frozenset()
+        )
 
     def compile_operations(self) -> tuple[ActionCandidate, ...]:
         candidates = []
@@ -101,6 +113,7 @@ class ActionCompiler:
                     name=name,
                     annotation=field.annotation,
                     required=field.is_required(),
+                    root=name in self._shared_field_names,
                     default=(
                         _MISSING
                         if field.is_required()
@@ -248,14 +261,34 @@ class ActionPublisher:
         explicit: dict[str, Any],
     ) -> Action:
         safe_values = self._safe_values(candidate.context)
-        argv = list(candidate.operation.split("."))
+        argv: list[str] = []
         bound: dict[str, Any] = {}
         validated_data: dict[str, Any] = {}
         slots: dict[str, Any] = {}
         unresolved = False
         prior_slots_resolved = True
 
-        for slot in candidate.slots:
+        for slot in (slot for slot in candidate.slots if slot.root):
+            argv.append(f"--{slot.name.replace('_', '-')}")
+            found, value = self._bound_value(
+                slot, explicit, safe_values, validated_data, prior_slots_resolved
+            )
+            if not found:
+                unresolved = True
+                prior_slots_resolved = False
+                argv.append(f"{{{slot.name}}}")
+                slots[slot.name] = {
+                    "type": _annotation_name(slot.annotation),
+                    "required": slot.required,
+                }
+                continue
+            validated_data[slot.name] = value
+            token, structured = self._encode_bound(value)
+            argv.append(token)
+            bound[slot.name] = structured
+
+        argv.extend(candidate.operation.split("."))
+        for slot in (slot for slot in candidate.slots if not slot.root):
             argv.append(f"--{slot.name.replace('_', '-')}")
             found, value = self._bound_value(
                 slot,

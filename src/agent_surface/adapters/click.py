@@ -92,11 +92,26 @@ class CliPlanCompiler:
         operations: OperationRegistry,
         *,
         references: ReferenceRegistry | None = None,
+        shared_input_model: type[BaseModel] | None = None,
     ) -> None:
         self._operations = operations
         self._references = references or ReferenceRegistry()
+        self._shared_input_model = shared_input_model
+        self.shared_fields: tuple[CliFieldPlan, ...] = ()
 
     def compile(self) -> tuple[CliCommandPlan, ...]:
+        if self._shared_input_model is not None:
+            self.shared_fields = tuple(
+                self._compile_field(name, field)
+                for name, field in self._shared_input_model.model_fields.items()
+            )
+            for field in self.shared_fields:
+                if field.kind != "option" or field.source != "argv":
+                    raise CliDefinitionError(
+                        "cli_parameter_conflict",
+                        f"Shared input {field.name} must be an argv option",
+                        fix="Use the default option projection for every shared input field.",
+                    )
         definitions = self._operations.list()
         paths = {
             definition.name: self._operation_path(definition.name)
@@ -113,9 +128,15 @@ class CliPlanCompiler:
         definition: OperationDefinition,
         path: tuple[str, ...],
     ) -> CliCommandPlan:
+        shared_names = (
+            set(self._shared_input_model.model_fields)
+            if self._shared_input_model is not None
+            else set()
+        )
         fields = tuple(
             self._compile_field(name, field)
             for name, field in definition.input_model.model_fields.items()
+            if name not in shared_names
         )
         self._validate_arguments(definition.name, fields)
         self._validate_transport_fields(definition, fields)
@@ -343,6 +364,7 @@ class ClickAdapter:
         render_options: RenderOptions | None = None,
         argv_provider: Callable[[], Sequence[str]] | None = None,
         envelope_renderer: CanonicalEnvelopeRenderer | None = None,
+        operation_error_exit_code: Callable[[str], int] | None = None,
     ) -> None:
         self._app = app
         self._references = references or ReferenceRegistry()
@@ -356,10 +378,14 @@ class ClickAdapter:
             )
         self._argv_provider = argv_provider
         self._envelope_renderer = envelope_renderer
-        self._plans = CliPlanCompiler(
+        compiler = CliPlanCompiler(
             app.operations,
             references=self._references,
-        ).compile()
+            shared_input_model=app.shared_input_model,
+        )
+        self._plans = compiler.compile()
+        self._shared_fields = compiler.shared_fields
+        self._operation_error_exit_code = operation_error_exit_code or (lambda _code: 4)
 
     def command(self) -> click.Group:
         root = _SurfaceGroup(
@@ -368,6 +394,7 @@ class ClickAdapter:
             context_settings={"help_option_names": ["-h", "--help"]},
             adapter=self,
             path=(),
+            params=[_click_parameter(field) for field in self._shared_fields],
         )
         for plan in self._plans:
             parent: click.Group = root
@@ -856,7 +883,7 @@ class ClickAdapter:
                     raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
                     sensitive_values=self._sensitive_param_values(plan, params),
                 ),
-                exit_code=4,
+                exit_code=self._exit_code_for(error),
                 operation=plan.operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
@@ -896,7 +923,7 @@ class ClickAdapter:
         plan: CliCommandPlan,
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
+        payload = self._shared_payload(context)
         for field in plan.fields:
             if field.source == "stdin":
                 if not params[_stdin_parameter_name(field)]:
@@ -913,6 +940,24 @@ class ClickAdapter:
             payload[field.name] = value
         return payload
 
+    def _shared_payload(self, context: click.Context) -> dict[str, Any]:
+        root = context.find_root()
+        payload: dict[str, Any] = {}
+        for field in self._shared_fields:
+            if root.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
+                continue
+            value = root.params[field.name]
+            if field.reference_type is not None:
+                value = self._references.decode_type(field.reference_type, value)
+            payload[field.name] = value
+        return payload
+
+    def _exit_code_for(self, error: OperationError) -> int:
+        exit_code = self._operation_error_exit_code(error.code)
+        if type(exit_code) is not int or not 1 <= exit_code <= 125:
+            raise ValueError("operation_error_exit_code must return an integer from 1 through 125")
+        return exit_code
+
     def _command_view(
         self,
         context: click.Context,
@@ -924,6 +969,10 @@ class ClickAdapter:
         arguments: dict[str, Any] = {}
         options: dict[str, Any] = {}
         flags = []
+        root = context.find_root()
+        for field in self._shared_fields:
+            if root.get_parameter_source(field.name) is ParameterSource.COMMANDLINE:
+                options[field.name] = _REDACTED if field.sensitive else root.params[field.name]
         for field in plan.fields:
             if field.source == "stdin":
                 if params[_stdin_parameter_name(field)]:
@@ -942,7 +991,7 @@ class ClickAdapter:
             flags.append("confirm")
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *plan.path)))
         return CommandView(
-            raw=_redact_raw(raw, plan),
+            raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
             parsed=ParsedCommand(
                 path=plan.path,
                 args=arguments,
@@ -1071,7 +1120,7 @@ class ClickAdapter:
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *plan.path)))
         document_format, yaml_style = _render_choices_from_raw(raw)
         command = CommandView(
-            raw=_redact_raw(raw, plan),
+            raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
             parsed=ParsedCommand(path=plan.path),
         )
         code = {
@@ -1083,7 +1132,10 @@ class ClickAdapter:
             command,
             OperationError(
                 code,
-                _redact_text(error.format_message(), _sensitive_raw_values(raw, plan)),
+                _redact_text(
+                    error.format_message(),
+                    _sensitive_raw_values(raw, plan, extra_fields=self._shared_fields),
+                ),
                 fix=f"Run {self._app.name} operations describe {plan.operation}.",
             ),
             exit_code=2,
@@ -1149,16 +1201,17 @@ class ClickAdapter:
             update={"format": document_format, "yaml_style": yaml_style}
         )
 
-    @staticmethod
     def _redact_error(
+        self,
         error: OperationError,
         plan: CliCommandPlan,
         *,
         raw: tuple[str, ...],
         sensitive_values: tuple[Any, ...],
     ) -> OperationError:
-        sensitive = {field.name for field in plan.fields if field.sensitive}
-        secrets = _sensitive_raw_values(raw, plan)
+        fields = (*self._shared_fields, *plan.fields)
+        sensitive = {field.name for field in fields if field.sensitive}
+        secrets = _sensitive_raw_values(raw, plan, extra_fields=self._shared_fields)
 
         def redact(value: Any, key: str | None = None) -> Any:
             if key in sensitive:
@@ -1328,10 +1381,16 @@ def _pagination_parameters() -> list[click.Parameter]:
     ]
 
 
-def _redact_raw(raw: tuple[str, ...], plan: CliCommandPlan) -> tuple[str, ...]:
-    sensitive_values = frozenset(_sensitive_raw_values(raw, plan))
+def _redact_raw(
+    raw: tuple[str, ...],
+    plan: CliCommandPlan,
+    *,
+    extra_fields: tuple[CliFieldPlan, ...] = (),
+) -> tuple[str, ...]:
+    fields = (*extra_fields, *plan.fields)
+    sensitive_values = frozenset(_sensitive_raw_values(raw, plan, extra_fields=extra_fields))
     redacted = tuple(_REDACTED if token in sensitive_values else token for token in raw)
-    for field in plan.fields:
+    for field in fields:
         if field.source != "argv" or not field.sensitive or field.kind != "option":
             continue
         option = field.parameter_decls[0]
@@ -1345,10 +1404,12 @@ def _redact_raw(raw: tuple[str, ...], plan: CliCommandPlan) -> tuple[str, ...]:
 def _sensitive_raw_values(
     raw: tuple[str, ...],
     plan: CliCommandPlan,
+    *,
+    extra_fields: tuple[CliFieldPlan, ...] = (),
 ) -> tuple[str, ...]:
     options = {
         field.parameter_decls[0]: field
-        for field in plan.fields
+        for field in (*extra_fields, *plan.fields)
         if field.source == "argv" and field.kind == "option"
     }
     arguments = tuple(field for field in plan.fields if field.kind == "argument")

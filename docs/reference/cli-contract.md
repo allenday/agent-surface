@@ -26,6 +26,28 @@ parsed view stays shallow and close to parser truth. For a generated group mount
 consumer-owned Click root, supply `argv_provider` to preserve parent options that Click consumed
 before dispatching into the group.
 
+## Shared root inputs
+
+Declare app-wide source inputs once, then inherit them in every operation request model:
+
+```python
+class SharedInputs(BaseModel):
+    registry: Path | None = None
+
+class HostStatusRequest(SharedInputs):
+    host: str
+
+app = App("infralink", shared_input_model=SharedInputs)
+```
+
+Click projects shared fields before the command path—`infralink --registry REGISTRY host status
+HOST`—and merges explicitly supplied values into the operation payload. Shared fields remain in
+each operation's Pydantic validation and MCP schema, but are not repeated as leaf options. Request
+models must inherit the shared model and may not override one of its fields. Shared inputs are
+argv options only, keeping the root command shape unambiguous.
+When publishing operation candidates, construct `ActionCompiler` with the same
+`shared_input_model`; bound shared slots are emitted before the operation path.
+
 ## Sensitive stdin fields
 
 A sensitive singular string field may opt into one bounded stdin value for the Click projection:
@@ -69,6 +91,11 @@ request field, and its normal sensitive-value redaction applies.
 | `3` | confirmation required or policy denial |
 | `4` | domain operation error |
 | `70` | unexpected internal failure |
+
+For expected handler errors, `ClickAdapter(..., operation_error_exit_code=...)` may map a stable
+`OperationError.code` to a process exit code; unknown codes default to `4`. This hook does not
+change the structured error envelope, parsing/input (`2`), confirmation (`3`), or internal (`70`)
+taxonomy.
 
 Errors include a stable code, message, repair guidance when available, and bounded next actions.
 Oversized successes become complete structured size errors; output is never silently truncated.

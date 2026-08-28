@@ -94,6 +94,28 @@ def test_binding_precedence_is_explicit_then_exact_name_then_default() -> None:
     assert contextual.bound == {"ref": "from-context", "count": 2}
 
 
+def test_root_slots_precede_the_operation_path() -> None:
+    plan = candidate(
+        ActionSlotPlan(name="registry", annotation=str, required=True, root=True),
+        ActionSlotPlan(name="host", annotation=str, required=True),
+    )
+    publisher = ActionPublisher(
+        references=ReferenceRegistry(),
+        policy=AllowActions(frozenset({"resource.inspect"})),
+    )
+
+    published = publisher.publish((plan,), values={"registry": "local", "host": "node-1"})[0]
+
+    assert published.command == (
+        "--registry",
+        "local",
+        "resource",
+        "inspect",
+        "--host",
+        "node-1",
+    )
+
+
 def test_dependent_pydantic_default_factory_runs_after_prior_slots_resolve() -> None:
     class FactoryInput(BaseModel):
         prefix: str

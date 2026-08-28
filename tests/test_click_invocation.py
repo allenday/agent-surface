@@ -163,6 +163,48 @@ def test_input_and_domain_errors_are_structured_with_stable_exits() -> None:
     assert missing_document["fix"] == "Choose another message."
 
 
+def test_shared_inputs_are_root_options_and_merge_into_the_operation_request() -> None:
+    class SharedInputs(BaseModel):
+        registry: str
+
+    class Request(SharedInputs):
+        host: str
+
+    class Result(BaseModel):
+        registry: str
+        host: str
+
+    app = App("infra", shared_input_model=SharedInputs)
+
+    @app.operation("host.status", read_only=True)
+    def status(request: Request) -> Result:
+        return Result(registry=request.registry, host=request.host)
+
+    result, document = invoke_json(
+        app,
+        ["--registry", "/var/lib/infra", "host", "status", "--host", "node-1"],
+    )
+
+    assert result.exit_code == 0
+    assert document["result"] == {"registry": "/var/lib/infra", "host": "node-1"}
+    assert document["command"]["raw"][:3] == ["infra", "--registry", "/var/lib/infra"]
+    assert document["command"]["parsed"]["options"] == {
+        "registry": "/var/lib/infra",
+        "host": "node-1",
+    }
+
+
+def test_operation_error_exit_policy_maps_typed_error_codes() -> None:
+    result, document = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "missing"],
+        operation_error_exit_code=lambda code: 3 if code == "message_missing" else 4,
+    )
+
+    assert result.exit_code == 3
+    assert document["error"]["code"] == "message_missing"
+
+
 def test_click_parse_error_is_a_repairable_structured_document() -> None:
     result, document = invoke_json(echo_app(), ["message", "echo"])
 
