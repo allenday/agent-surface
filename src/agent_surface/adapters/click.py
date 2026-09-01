@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import math
+import sys
 import types
 import typing
 from collections.abc import Callable, Sequence
@@ -38,6 +39,7 @@ CliFieldSource = Literal["argv", "stdin"]
 
 _RESERVED_ROOTS = frozenset({"actions", "operations"})
 _RESERVED_FIELDS = frozenset({"format", "yaml_style"})
+_RESERVED_OPTIONS = frozenset({"--format", "--yaml-style"})
 _RAW_ARGV_KEY = "agent_surface.raw_argv"
 _REDACTED = "<redacted>"
 _MIN_CLI_BYTES = 1_024
@@ -139,7 +141,7 @@ class CliPlanCompiler:
             if name not in shared_names
         )
         self._validate_arguments(definition.name, fields)
-        self._validate_transport_fields(definition, fields)
+        self._validate_transport_fields(definition, (*self.shared_fields, *fields))
         return CliCommandPlan(
             operation=definition.name,
             path=path,
@@ -195,10 +197,11 @@ class CliPlanCompiler:
                 )
             stdin_max_bytes = candidate_max_bytes
             strip_trailing_newline = candidate_strip
-        parameter_decls = (
-            ()
-            if source == "stdin"
-            else (name,) if kind == "argument" else (f"--{name.replace('_', '-')}",)
+        parameter_decls = self._parameter_decls(
+            name,
+            cli_extra,
+            kind=kind,
+            source=source,
         )
         return CliFieldPlan(
             name=name,
@@ -217,6 +220,50 @@ class CliPlanCompiler:
             stdin_max_bytes=stdin_max_bytes,
             strip_trailing_newline=strip_trailing_newline,
         )
+
+    @staticmethod
+    def _parameter_decls(
+        name: str,
+        cli_extra: dict[str, Any],
+        *,
+        kind: CliParameterKind,
+        source: CliFieldSource,
+    ) -> tuple[str, ...]:
+        options = cli_extra.get("options")
+        if options is None:
+            return () if source == "stdin" else (name,) if kind == "argument" else (
+                f"--{name.replace('_', '-')}",
+            )
+        if kind != "option" or source != "argv":
+            raise CliDefinitionError(
+                "cli_parameter_conflict",
+                f"CLI options metadata for {name} requires an argv option field",
+                fix="Use cli.options only with the default argv option projection.",
+            )
+        if (
+            not isinstance(options, list)
+            or not options
+            or any(
+                type(option) is not str
+                or not option.startswith("--")
+                or len(option) == 2
+                or option.startswith("---")
+                or any(character.isspace() for character in option)
+                or "/" in option
+                or "=" in option
+                for option in options
+            )
+            or len(set(options)) != len(options)
+        ):
+            raise CliDefinitionError(
+                "cli_parameter_conflict",
+                f"CLI options metadata for {name} must be unique long options",
+                fix=(
+                    "Set cli.options to a non-empty list such as "
+                    "[\"--apply\", \"--apply-changes\"]."
+                ),
+            )
+        return tuple(options)
 
     def _value_shape(
         self,
@@ -306,7 +353,27 @@ class CliPlanCompiler:
             for field in stdin_fields
             if field.stdin_flag is not None
         }
+        option_fields: dict[str, CliFieldPlan] = {}
         for field in fields:
+            if field.source == "argv" and field.kind == "option":
+                for option in _option_declarations(field):
+                    if option in _RESERVED_OPTIONS:
+                        raise CliDefinitionError(
+                            "cli_parameter_conflict",
+                            (
+                                f"Option {option} for {field.name} conflicts with "
+                                "generated rendering options"
+                            ),
+                            fix="Choose a different cli.options value.",
+                        )
+                    other = option_fields.get(option)
+                    if other is not None:
+                        raise CliDefinitionError(
+                            "cli_parameter_conflict",
+                            f"Option {option} is declared by both {other.name} and {field.name}",
+                            fix="Give each argv option a unique cli.options value.",
+                        )
+                    option_fields[option] = field
             if (
                 field.source == "argv"
                 and field.kind == "option"
@@ -1409,11 +1476,11 @@ def _redact_raw(
     for field in fields:
         if field.source != "argv" or not field.sensitive or field.kind != "option":
             continue
-        option = field.parameter_decls[0]
-        redacted = tuple(
-            f"{option}={_REDACTED}" if token.startswith(f"{option}=") else token
-            for token in redacted
-        )
+        for option in field.parameter_decls:
+            redacted = tuple(
+                f"{option}={_REDACTED}" if token.startswith(f"{option}=") else token
+                for token in redacted
+            )
     return redacted
 
 
@@ -1424,9 +1491,10 @@ def _sensitive_raw_values(
     extra_fields: tuple[CliFieldPlan, ...] = (),
 ) -> tuple[str, ...]:
     options = {
-        field.parameter_decls[0]: field
+        option: field
         for field in (*extra_fields, *plan.fields)
         if field.source == "argv" and field.kind == "option"
+        for option in field.parameter_decls
     }
     arguments = tuple(field for field in plan.fields if field.kind == "argument")
     values: list[str] = []
@@ -1532,12 +1600,14 @@ def _click_parameter(
         )
     declarations = field.parameter_decls
     if field.value_kind == "boolean":
-        declarations = (f"{declarations[0]}/--no-{declarations[0][2:]}",)
+        declarations = tuple(
+            f"{declaration}/--no-{declaration[2:]}" for declaration in declarations
+        )
     option_kwargs: dict[str, Any] = {}
     if not required:
         option_kwargs["default"] = () if field.multiple else None
     return click.Option(
-        declarations,
+        (*declarations, field.name),
         required=required,
         type=parameter_type,
         multiple=field.multiple,
@@ -1546,6 +1616,13 @@ def _click_parameter(
         show_default=False,
         **option_kwargs,
     )
+
+
+def _option_declarations(field: CliFieldPlan) -> tuple[str, ...]:
+    declarations = field.parameter_decls
+    if field.value_kind != "boolean":
+        return declarations
+    return (*declarations, *(f"--no-{declaration[2:]}" for declaration in declarations))
 
 
 def _stdin_parameters(fields: tuple[CliFieldPlan, ...]) -> list[click.Option]:
@@ -1572,7 +1649,7 @@ def _stdin_parameter_name(field: CliFieldPlan) -> str:
 
 def _read_stdin_field(field: CliFieldPlan) -> str:
     assert field.stdin_max_bytes is not None  # compiler validates stdin field plans
-    value = click.get_binary_stream("stdin").read(field.stdin_max_bytes + 1)
+    value = sys.stdin.buffer.read(field.stdin_max_bytes + 1)
     if not value:
         raise OperationError(
             "stdin_missing",

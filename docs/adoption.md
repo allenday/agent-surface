@@ -32,6 +32,17 @@ adapter inspect those declared models when generating transport inputs, so appli
 parallel CLI schemas. Retain an existing transport until parity is proven; the native MCP sibling is
 the next planned projection.
 
+When an established CLI spelling differs from an expressive Pydantic field name, declare its
+canonical long option and optional aliases in transport metadata. This affects Click only; MCP and
+generated schemas retain the field name:
+
+```python
+apply_changes: bool = Field(
+    default=False,
+    json_schema_extra={"cli": {"options": ["--apply", "--apply-changes"]}},
+)
+```
+
 ## Transport layer
 
 CLI and MCP adapters are sibling projections of the operation registry. Never implement one
