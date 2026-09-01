@@ -16,6 +16,9 @@ boundary, then the [Python API reference](reference/python-api.md) for the publi
 [references and actions](how-to/references-and-actions.md) when your domain needs stable object
 identity or scoped action discovery.
 
+For a host that discovers separately installed application packages, use the
+[operation manifest reference](reference/operation-manifests.md).
+
 ## Connect
 
 Use the [bookstore MCP integration](tutorials/bookstore.md#connect-codex-and-claude-code) for a

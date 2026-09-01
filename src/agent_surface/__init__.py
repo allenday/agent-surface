@@ -1,6 +1,6 @@
 """Typed application surfaces for agents."""
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 from agent_surface.actions import (
     ActionCandidate,
@@ -29,6 +29,17 @@ from agent_surface.contracts import (
     SuccessOutcome,
 )
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation
+from agent_surface.manifest import (
+    ManifestCollision,
+    ManifestMismatch,
+    generate_manifest,
+    installed_manifests,
+    load_manifest,
+    manifest_for,
+    validate_manifests,
+    verify_manifest,
+    write_manifest,
+)
 from agent_surface.operations import OperationError
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
 from agent_surface.references import (
@@ -67,8 +78,14 @@ __all__ = [
     "InvalidReference",
     "InvalidActionCursor",
     "Invocation",
+    "ManifestMismatch",
+    "ManifestCollision",
+    "generate_manifest",
+    "installed_manifests",
     "MissingReferenceCodec",
     "OperationError",
+    "load_manifest",
+    "manifest_for",
     "NoActions",
     "OutputBudget",
     "OutputBudgetExceeded",
@@ -86,5 +103,8 @@ __all__ = [
     "error_outcome",
     "render",
     "render_envelope",
+    "verify_manifest",
+    "validate_manifests",
+    "write_manifest",
     "success_outcome",
 ]

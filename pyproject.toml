@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-surface"
-version = "0.1.6"
+version = "0.1.7"
 description = "Project typed Python operations as agent-friendly CLIs, MCP tools, and schemas"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,11 +26,15 @@ dependencies = [
 Repository = "https://github.com/allenday/agent-surface"
 Issues = "https://github.com/allenday/agent-surface/issues"
 
+[project.entry-points.hatch]
+agent-surface = "agent_surface.hatch"
+
 [project.optional-dependencies]
 mcp = ["mcp>=2.0.0,<3"]
 
 [dependency-groups]
 dev = [
+  "hatchling>=1.32.0",
   "mypy>=1.17",
   "pytest>=8.4",
   "pytest-asyncio>=1.1",

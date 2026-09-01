@@ -13,6 +13,7 @@ The public surface is organized around a few concepts:
 | `ClickAdapter`, `build_click_group` | project the registry into a mountable Click tree |
 | `MCPAdapter` | project the registry into native MCP v2 tools and transports |
 | `CanonicalEnvelopeRenderer`, `Invocation` | preserve an application's existing response normal form across adapters |
+| `installed_manifests`, `verify_manifest` | discover installed operation metadata without imports, then fail closed before execution |
 
 Operations accept one Pydantic request model and return one declared result model. Both synchronous
 and asynchronous handlers use the same registry:
@@ -36,6 +37,8 @@ pip install 'agent-surface[mcp]'
 Import `MCPAdapter` from `agent_surface.adapters.mcp`, then use `.server` for embedding or in-memory
 tests, `await .run_stdio()` for stdio, and `.streamable_http_app()` for ASGI. See the
 [MCP contract](mcp-contract.md).
+
+For installed third-party operation packages, see [operation manifests](operation-manifests.md).
 
 ## Canonical application envelopes
 
