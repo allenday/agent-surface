@@ -816,6 +816,7 @@ class ClickAdapter:
             outcome_exit_code = invocation.exit_code
             actions = self._action_provider.actions_for(
                 operation=plan.operation,
+                request=request,
                 result=result,
             )
             envelope: BaseModel
@@ -1023,10 +1024,15 @@ class ClickAdapter:
         try:
             actions = self._action_provider.actions_for(
                 operation=operation,
+                request=request,
                 error=error,
             )
         except Exception:
-            actions = NoActions().actions_for(operation=operation, error=error)
+            actions = NoActions().actions_for(
+                operation=operation,
+                request=request,
+                error=error,
+            )
         if self._envelope_renderer is not None and definition is not None:
             invocation = Invocation(
                 operation=definition,

@@ -295,10 +295,11 @@ class BookstoreActions:
         self,
         *,
         operation: str,
+        request: BaseModel | None = None,
         result: object | None = None,
         error: OperationError | None = None,
     ) -> ActionCollection:
-        del error
+        del error, request
         actions: list[Action] = []
         if operation == "books.search" and isinstance(result, SearchPage):
             if result.items:

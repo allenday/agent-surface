@@ -2,6 +2,8 @@
 
 from typing import Any, Protocol
 
+from pydantic import BaseModel
+
 from agent_surface.budgets import OutputBudget
 from agent_surface.contracts import (
     Action,
@@ -21,6 +23,7 @@ class ActionProvider(Protocol):
         self,
         *,
         operation: str,
+        request: BaseModel | None = None,
         result: object | None = None,
         error: OperationError | None = None,
     ) -> ActionCollection: ...
@@ -42,6 +45,7 @@ class NoActions:
         self,
         *,
         operation: str,
+        request: BaseModel | None = None,
         result: object | None = None,
         error: OperationError | None = None,
     ) -> ActionCollection:

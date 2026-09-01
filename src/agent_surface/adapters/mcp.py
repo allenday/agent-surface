@@ -7,6 +7,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 try:
     import mcp_types as types
     from mcp.server.lowlevel import Server
@@ -183,7 +185,7 @@ class MCPAdapter:
             )
         if definition.destructive and confirm_field is None:
             arguments.pop("confirm", None)
-        request: Any | None = None
+        request: BaseModel | None = None
         try:
             arguments = self._decode_references(definition, arguments)
             request = self._app.operations.validate(definition, arguments)
@@ -193,6 +195,7 @@ class MCPAdapter:
             try:
                 actions = self._action_provider.actions_for(
                     operation=definition.name,
+                    request=request,
                     result=result,
                 )
             except Exception:
@@ -280,12 +283,20 @@ class MCPAdapter:
         operation: str,
         include_actions: bool = True,
         definition: OperationDefinition | None = None,
-        request: Any | None = None,
+        request: BaseModel | None = None,
     ) -> types.CallToolResult:
-        actions = NoActions().actions_for(operation=operation, error=error)
+        actions = NoActions().actions_for(
+            operation=operation,
+            request=request,
+            error=error,
+        )
         if include_actions:
             with suppress(Exception):
-                actions = self._action_provider.actions_for(operation=operation, error=error)
+                actions = self._action_provider.actions_for(
+                    operation=operation,
+                    request=request,
+                    error=error,
+                )
         if definition is None:
             return self._mcp_result(error_outcome(error, next_actions=actions), is_error=True)
         return self._mcp_result(
