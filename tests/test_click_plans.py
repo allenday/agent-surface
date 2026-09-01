@@ -79,6 +79,60 @@ def test_explicit_argument_metadata_changes_only_the_declared_field() -> None:
     assert fields[1].kind == "option"
 
 
+def test_declarative_long_options_replace_the_derived_option_name() -> None:
+    class AliasedRequest(BaseModel):
+        plan_only: bool = Field(
+            default=False,
+            json_schema_extra={"cli": {"options": ["--plan", "--plan-only"]}},
+        )
+        apply_changes: bool = Field(
+            default=False,
+            json_schema_extra={"cli": {"options": ["--apply"]}},
+        )
+
+    fields = CliPlanCompiler(app_for(AliasedRequest).operations).compile()[0].fields
+
+    assert fields[0].parameter_decls == ("--plan", "--plan-only")
+    assert fields[1].parameter_decls == ("--apply",)
+
+
+@pytest.mark.parametrize(
+    "cli",
+    [
+        {"options": []},
+        {"options": ["plan"]},
+        {"options": ["--plan", "--plan"]},
+        {"kind": "argument", "options": ["--plan"]},
+        {"source": "stdin", "options": ["--plan"]},
+    ],
+)
+def test_invalid_declarative_long_options_are_rejected(cli: dict[str, object]) -> None:
+    class InvalidAliasRequest(BaseModel):
+        plan_only: bool = Field(default=False, json_schema_extra={"cli": cli})
+
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app_for(InvalidAliasRequest).operations).compile()
+
+    assert raised.value.code == "cli_parameter_conflict"
+
+
+def test_declarative_long_options_cannot_collide_between_fields() -> None:
+    class CollidingAliasRequest(BaseModel):
+        plan_only: bool = Field(
+            default=False,
+            json_schema_extra={"cli": {"options": ["--apply"]}},
+        )
+        apply_changes: bool = Field(
+            default=False,
+            json_schema_extra={"cli": {"options": ["--apply"]}},
+        )
+
+    with pytest.raises(CliDefinitionError) as raised:
+        CliPlanCompiler(app_for(CollidingAliasRequest).operations).compile()
+
+    assert raised.value.code == "cli_parameter_conflict"
+
+
 def test_sensitive_string_field_can_be_projected_from_stdin() -> None:
     class StdinRequest(BaseModel):
         host: str

@@ -85,6 +85,58 @@ def test_default_rendering_is_yaml_with_small_flow_collections() -> None:
     assert "result: {message: hello}" in result.stdout
 
 
+def test_declarative_boolean_option_aliases_bind_the_pydantic_field() -> None:
+    class Request(BaseModel):
+        apply_changes: bool = Field(
+            default=False,
+            json_schema_extra={"cli": {"options": ["--apply", "--apply-changes"]}},
+        )
+
+    class Result(BaseModel):
+        applied: bool
+
+    app = App("changes")
+
+    @app.operation("changes.apply")
+    def apply(request: Request) -> Result:
+        return Result(applied=request.apply_changes)
+
+    for option in ("--apply", "--apply-changes"):
+        result, document = invoke_json(app, ["changes", "apply", option])
+
+        assert result.exit_code == 0
+        assert document["result"] == {"applied": True}
+
+
+def test_sensitive_declarative_option_alias_is_redacted_from_raw_argv() -> None:
+    class Request(BaseModel):
+        api_token: str = Field(
+            json_schema_extra={
+                "sensitive": True,
+                "cli": {"options": ["--token", "--api-token"]},
+            }
+        )
+
+    class Result(BaseModel):
+        accepted: bool
+
+    app = App("tokens")
+
+    @app.operation("tokens.use")
+    def use(request: Request) -> Result:
+        return Result(accepted=bool(request.api_token))
+
+    result, document = invoke_json(
+        app,
+        ["tokens", "use", "--api-token", "secret-value"],
+    )
+
+    assert result.exit_code == 0
+    assert "--api-token" in document["command"]["raw"]
+    assert "<redacted>" in document["command"]["raw"]
+    assert "secret-value" not in result.stdout
+
+
 def test_async_handler_uses_the_same_registry_invocation_path() -> None:
     class Request(BaseModel):
         value: int
