@@ -7,6 +7,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 try:
     import mcp_types as types
     from mcp.server.lowlevel import Server
@@ -22,7 +24,13 @@ from agent_surface.budgets import OutputBudgetExceeded
 from agent_surface.contracts import ErrorOutcome, SuccessOutcome
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
 from agent_surface.operations import OperationDefinition, OperationError
-from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
+from agent_surface.outcomes import (
+    ActionProvider,
+    NoActions,
+    _provider_actions_for,
+    error_outcome,
+    success_outcome,
+)
 from agent_surface.references import InvalidReference, ReferenceError, ReferenceRegistry
 from agent_surface.rendering import RenderOptions, render
 
@@ -183,7 +191,7 @@ class MCPAdapter:
             )
         if definition.destructive and confirm_field is None:
             arguments.pop("confirm", None)
-        request: Any | None = None
+        request: BaseModel | None = None
         try:
             arguments = self._decode_references(definition, arguments)
             request = self._app.operations.validate(definition, arguments)
@@ -191,8 +199,10 @@ class MCPAdapter:
                 await self._app.operations._invoke_request_with_outcome(definition, request)
             ).result
             try:
-                actions = self._action_provider.actions_for(
+                actions = _provider_actions_for(
+                    self._action_provider,
                     operation=definition.name,
+                    request=request,
                     result=result,
                 )
             except Exception:
@@ -280,12 +290,21 @@ class MCPAdapter:
         operation: str,
         include_actions: bool = True,
         definition: OperationDefinition | None = None,
-        request: Any | None = None,
+        request: BaseModel | None = None,
     ) -> types.CallToolResult:
-        actions = NoActions().actions_for(operation=operation, error=error)
+        actions = NoActions().actions_for(
+            operation=operation,
+            request=request,
+            error=error,
+        )
         if include_actions:
             with suppress(Exception):
-                actions = self._action_provider.actions_for(operation=operation, error=error)
+                actions = _provider_actions_for(
+                    self._action_provider,
+                    operation=operation,
+                    request=request,
+                    error=error,
+                )
         if definition is None:
             return self._mcp_result(error_outcome(error, next_actions=actions), is_error=True)
         return self._mcp_result(

@@ -6,6 +6,7 @@ from mcp import Client
 from pydantic import BaseModel, Field
 
 from agent_surface import (
+    ActionCollection,
     App,
     OperationError,
     OperationOutcome,
@@ -56,6 +57,105 @@ async def test_call_tool_returns_authoritative_structured_success_and_yaml_text(
     assert result.structured_content["next_actions"]["items"] == []
     assert result.content[0].text.startswith("schema_version:")
     assert "ok: true" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_action_provider_receives_validated_request_context() -> None:
+    class ContextActions:
+        def __init__(self) -> None:
+            self.requests: list[BaseModel | None] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            request: BaseModel | None = None,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.requests.append(request)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = ContextActions()
+    adapter = MCPAdapter(echo_app(), action_provider=actions)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("message.echo", {"text": "hello", "count": 2})
+
+    assert result.is_error is False
+    assert actions.requests == [EchoRequest(text="hello", count=2)]
+
+
+@pytest.mark.asyncio
+async def test_legacy_action_provider_without_request_remains_supported() -> None:
+    class LegacyActions:
+        def __init__(self) -> None:
+            self.operations: list[str] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.operations.append(operation)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = LegacyActions()
+    adapter = MCPAdapter(echo_app(), action_provider=actions)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("message.echo", {"text": "hello"})
+
+    assert result.is_error is False
+    assert result.structured_content["result"] == {"message": "hello"}
+    assert actions.operations == ["message.echo"]
+
+
+@pytest.mark.asyncio
+async def test_action_provider_receives_no_request_for_validation_failure() -> None:
+    class ContextActions:
+        def __init__(self) -> None:
+            self.requests: list[BaseModel | None] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            request: BaseModel | None = None,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.requests.append(request)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = ContextActions()
+    adapter = MCPAdapter(echo_app(), action_provider=actions)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("message.echo", {"text": "hello", "count": 9})
+
+    assert result.is_error is True
+    assert actions.requests == [None]
 
 
 @pytest.mark.asyncio

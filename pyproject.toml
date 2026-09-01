@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-surface"
-version = "0.1.9"
+version = "0.1.10"
 description = "Project typed Python operations as agent-friendly CLIs, MCP tools, and schemas"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,6 +40,9 @@ dev = [
   "pytest-asyncio>=1.1",
   "ruff>=0.12",
 ]
+
+[tool.hatch.build]
+exclude = ["/.superpowers"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_surface"]

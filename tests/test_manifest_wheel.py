@@ -1,8 +1,27 @@
 import subprocess
+import tarfile
 import textwrap
 import venv
 import zipfile
 from pathlib import Path
+
+
+def test_source_distribution_excludes_superpowers_workflow_files(tmp_path: Path) -> None:
+    project_root = Path(__file__).parents[1]
+    artifact_directory = tmp_path / "dist"
+
+    subprocess.run(
+        ["uv", "build", "--sdist", "--out-dir", str(artifact_directory), str(project_root)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    source_distribution = next(artifact_directory.glob("agent_surface-*.tar.gz"))
+    with tarfile.open(source_distribution) as archive:
+        members = archive.getnames()
+
+    assert all(".superpowers" not in Path(member).parts for member in members)
 
 
 def test_hatch_builds_and_installs_a_verifiable_manifest(tmp_path: Path) -> None:
@@ -82,6 +101,8 @@ def test_hatch_builds_and_installs_a_verifiable_manifest(tmp_path: Path) -> None
     agent_surface_wheel = next(artifact_directory.glob("agent_surface-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         assert "demo_ops-1.0.0.dist-info/agent-surface-operations.json" in archive.namelist()
+    with zipfile.ZipFile(agent_surface_wheel) as archive:
+        assert "agent_surface/py.typed" in archive.namelist()
 
     environment = tmp_path / "environment"
     venv.EnvBuilder(with_pip=True).create(environment)

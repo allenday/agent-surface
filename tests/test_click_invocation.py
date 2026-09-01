@@ -452,16 +452,19 @@ def test_error_action_provider_receives_the_invoked_operation() -> None:
     class RecordingActions:
         def __init__(self) -> None:
             self.operations: list[str] = []
+            self.requests: list[BaseModel | None] = []
 
         def actions_for(
             self,
             *,
             operation: str,
+            request: BaseModel | None = None,
             result: object | None = None,
             error: OperationError | None = None,
         ) -> ActionCollection:
             if error is not None:
                 self.operations.append(operation)
+                self.requests.append(request)
             return ActionCollection()
 
         def list_actions(
@@ -485,6 +488,149 @@ def test_error_action_provider_receives_the_invoked_operation() -> None:
 
     assert result.exit_code == 4
     assert actions.operations == ["message.echo"]
+    assert actions.requests == [EchoRequest(text="missing")]
+
+
+def test_action_provider_receives_validated_request_context() -> None:
+    class ContextActions:
+        def __init__(self) -> None:
+            self.requests: list[BaseModel | None] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            request: BaseModel | None = None,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.requests.append(request)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = ContextActions()
+
+    result, _ = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "hello", "--count", "2"],
+        action_provider=actions,
+    )
+
+    assert result.exit_code == 0
+    assert actions.requests == [EchoRequest(text="hello", count=2)]
+
+
+def test_legacy_action_provider_without_request_remains_supported() -> None:
+    class LegacyActions:
+        def __init__(self) -> None:
+            self.operations: list[str] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.operations.append(operation)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = LegacyActions()
+
+    result, document = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "hello"],
+        action_provider=actions,
+    )
+
+    assert result.exit_code == 0
+    assert document["result"] == {"message": "hello"}
+    assert actions.operations == ["message.echo"]
+
+
+def test_action_provider_type_error_is_not_retried_as_a_legacy_provider() -> None:
+    class BrokenActions:
+        def __init__(self) -> None:
+            self.calls: list[tuple[BaseModel | None, bool, bool]] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            request: BaseModel | None = None,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.calls.append((request, result is not None, error is not None))
+            if result is not None:
+                raise TypeError("provider failed internally")
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = BrokenActions()
+
+    result, document = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "hello"],
+        action_provider=actions,
+    )
+
+    assert result.exit_code == 70
+    assert document["error"]["code"] == "internal_error"
+    assert actions.calls == [
+        (EchoRequest(text="hello"), True, False),
+        (EchoRequest(text="hello"), False, True),
+    ]
+
+
+def test_action_provider_receives_no_request_for_validation_failure() -> None:
+    class ContextActions:
+        def __init__(self) -> None:
+            self.requests: list[BaseModel | None] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            request: BaseModel | None = None,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.requests.append(request)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = ContextActions()
+
+    result, _ = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "hello", "--count", "9"],
+        action_provider=actions,
+    )
+
+    assert result.exit_code == 2
+    assert actions.requests == [None]
 
 
 def test_reference_decode_failure_is_structured() -> None:
