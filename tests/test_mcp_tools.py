@@ -2,7 +2,7 @@ import pytest
 from mcp import Client
 from pydantic import BaseModel, Field
 
-from agent_surface import App
+from agent_surface import Action, ActionCollection, App, OperationError
 from agent_surface.adapters.mcp import MCPAdapter
 
 
@@ -102,3 +102,80 @@ async def test_malformed_tool_cursor_is_rejected() -> None:
     async with Client(adapter.server, raise_exceptions=True) as client:
         with pytest.raises(Exception, match="cursor"):
             await client.list_tools(cursor="not-a-cursor")
+
+
+@pytest.mark.asyncio
+async def test_composition_projects_multiple_adapters_through_one_server() -> None:
+    catalog = MCPAdapter(catalog_app())
+
+    class StatusRequest(BaseModel):
+        name: str
+
+    class StatusResult(BaseModel):
+        value: str
+
+    class StatusActions:
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            del operation, result, error
+            return ActionCollection(
+                total=1,
+                returned=1,
+                items=(Action(rel="source-inspect", command=("status", "show")),),
+            )
+
+        def list_actions(
+            self,
+            *,
+            cursor: str | None = None,
+            budget: object | None = None,
+        ) -> ActionCollection:
+            del cursor, budget
+            return ActionCollection()
+
+        def explain(self, operation: str) -> Action | None:
+            del operation
+            return None
+
+    status_app = App("status")
+
+    @status_app.operation("status.show", read_only=True, idempotent=True)
+    def status(request: StatusRequest) -> StatusResult:
+        if request.name == "broken":
+            raise OperationError("source_failure", "Source adapter error")
+        return StatusResult(value=request.name)
+
+    status_adapter = MCPAdapter(status_app, action_provider=StatusActions())
+    adapter = MCPAdapter.compose("combined", catalog, status_adapter)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        tools = await client.list_tools()
+        catalog_result = await client.call_tool("books.search-000", {"query": "library"})
+        status_result = await client.call_tool("status.show", {"name": "ready"})
+        status_error = await client.call_tool("status.show", {"name": "broken"})
+
+    assert [tool.name for tool in tools.tools] == ["books.search-000", "status.show"]
+    assert catalog_result.structured_content["result"] == {"count": 7}
+    assert status_result.structured_content["result"] == {"value": "ready"}
+    assert status_result.structured_content["next_actions"]["items"][0]["rel"] == "source-inspect"
+    assert status_error.is_error is True
+    assert status_error.structured_content["error"]["code"] == "source_failure"
+    assert status_error.structured_content["next_actions"]["items"][0]["rel"] == "source-inspect"
+
+
+def test_composition_rejects_duplicate_tool_names() -> None:
+    first = MCPAdapter(catalog_app())
+    second = MCPAdapter(catalog_app())
+
+    with pytest.raises(ValueError, match="Duplicate MCP tool name: books.search-000"):
+        MCPAdapter.compose("combined", first, second)
+
+
+def test_composition_requires_adapters() -> None:
+    with pytest.raises(ValueError, match="at least one adapter"):
+        MCPAdapter.compose("combined")

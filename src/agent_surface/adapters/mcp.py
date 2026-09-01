@@ -63,12 +63,59 @@ class MCPAdapter:
         self._page_size = page_size
         self._plans = tuple(self._compile_tool(item) for item in app.operations.list())
         self._definitions = {item.name: item for item in app.operations.list()}
+        self._composed_adapters: dict[str, MCPAdapter] | None = None
         self._server: Server[Any] = Server(
             app.name,
             version=app.version,
             on_list_tools=self._list_tools,
             on_call_tool=self._call_tool,
         )
+
+    @classmethod
+    def compose(
+        cls,
+        name: str,
+        *adapters: "MCPAdapter",
+        version: str = "0.1.0",
+        page_size: int = 20,
+    ) -> "MCPAdapter":
+        """Project existing adapters through one MCP server.
+
+        Each operation remains bound to its source adapter, preserving that
+        adapter's references, action provider, renderer, and error policy.
+        """
+
+        if not adapters:
+            raise ValueError("MCP composition requires at least one adapter")
+        if page_size < 1:
+            raise ValueError("page_size must be positive")
+
+        dispatch: dict[str, MCPAdapter] = {}
+        plans: list[MCPToolPlan] = []
+        for adapter in adapters:
+            for plan in adapter._plans:
+                if plan.operation in dispatch:
+                    raise ValueError(f"Duplicate MCP tool name: {plan.operation}")
+                dispatch[plan.operation] = adapter
+                plans.append(plan)
+
+        composed = cls.__new__(cls)
+        composed._app = App(name, version=version)
+        composed._references = ReferenceRegistry()
+        composed._action_provider = NoActions()
+        composed._render_options = RenderOptions()
+        composed._envelope_renderer = None
+        composed._page_size = page_size
+        composed._plans = tuple(sorted(plans, key=lambda plan: plan.operation))
+        composed._definitions = {}
+        composed._composed_adapters = dispatch
+        composed._server = Server(
+            name,
+            version=version,
+            on_list_tools=composed._list_tools,
+            on_call_tool=composed._call_tool,
+        )
+        return composed
 
     @property
     def server(self) -> Server[Any]:
@@ -112,6 +159,11 @@ class MCPAdapter:
         context: Any,
         params: types.CallToolRequestParams,
     ) -> types.CallToolResult:
+        if self._composed_adapters is not None:
+            adapter = self._composed_adapters.get(params.name)
+            if adapter is None:
+                raise MCPError(types.INVALID_PARAMS, f"Unknown tool: {params.name}")
+            return await adapter._call_tool(context, params)
         del context
         definition = self._definitions.get(params.name)
         if definition is None:
