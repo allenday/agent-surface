@@ -28,7 +28,7 @@ from agent_surface.operations import (
     OperationOutputError,
     OperationRegistry,
 )
-from agent_surface.outcomes import ActionProvider, NoActions, error_outcome
+from agent_surface.outcomes import ActionProvider, NoActions, _provider_actions_for, error_outcome
 from agent_surface.references import ReferenceError, ReferenceRegistry, encode_scalar
 from agent_surface.rendering import RenderOptions, render, render_envelope
 
@@ -814,7 +814,8 @@ class ClickAdapter:
             )
             result = invocation.result
             outcome_exit_code = invocation.exit_code
-            actions = self._action_provider.actions_for(
+            actions = _provider_actions_for(
+                self._action_provider,
                 operation=plan.operation,
                 request=request,
                 result=result,
@@ -1022,7 +1023,8 @@ class ClickAdapter:
         request: BaseModel | None = None,
     ) -> typing.Never:
         try:
-            actions = self._action_provider.actions_for(
+            actions = _provider_actions_for(
+                self._action_provider,
                 operation=operation,
                 request=request,
                 error=error,

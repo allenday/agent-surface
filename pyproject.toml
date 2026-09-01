@@ -41,6 +41,9 @@ dev = [
   "ruff>=0.12",
 ]
 
+[tool.hatch.build]
+exclude = ["/.superpowers"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_surface"]
 

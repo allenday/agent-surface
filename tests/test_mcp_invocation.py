@@ -93,6 +93,39 @@ async def test_action_provider_receives_validated_request_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_action_provider_without_request_remains_supported() -> None:
+    class LegacyActions:
+        def __init__(self) -> None:
+            self.operations: list[str] = []
+
+        def actions_for(
+            self,
+            *,
+            operation: str,
+            result: object | None = None,
+            error: OperationError | None = None,
+        ) -> ActionCollection:
+            self.operations.append(operation)
+            return ActionCollection()
+
+        def list_actions(self, **kwargs: object) -> ActionCollection:
+            return ActionCollection()
+
+        def explain(self, operation: str):
+            return None
+
+    actions = LegacyActions()
+    adapter = MCPAdapter(echo_app(), action_provider=actions)
+
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("message.echo", {"text": "hello"})
+
+    assert result.is_error is False
+    assert result.structured_content["result"] == {"message": "hello"}
+    assert actions.operations == ["message.echo"]
+
+
+@pytest.mark.asyncio
 async def test_action_provider_receives_no_request_for_validation_failure() -> None:
     class ContextActions:
         def __init__(self) -> None:

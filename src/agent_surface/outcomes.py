@@ -1,5 +1,6 @@
 """Transport-neutral invocation outcome construction."""
 
+import inspect
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -61,6 +62,32 @@ class NoActions:
 
     def explain(self, operation: str) -> Action | None:
         return None
+
+
+def _provider_actions_for(
+    provider: ActionProvider,
+    *,
+    operation: str,
+    request: BaseModel | None = None,
+    result: object | None = None,
+    error: OperationError | None = None,
+) -> ActionCollection:
+    """Invoke providers with request context when their signature accepts it."""
+    parameters = inspect.signature(provider.actions_for).parameters
+    request_parameter = parameters.get("request")
+    accepts_request = (
+        request_parameter is not None
+        and request_parameter.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    ) or any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+    arguments: dict[str, Any] = {
+        "operation": operation,
+        "result": result,
+        "error": error,
+    }
+    if accepts_request:
+        arguments["request"] = request
+    return provider.actions_for(**arguments)
 
 
 def success_outcome[ResultT](

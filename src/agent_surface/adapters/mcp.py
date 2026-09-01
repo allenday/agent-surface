@@ -24,7 +24,13 @@ from agent_surface.budgets import OutputBudgetExceeded
 from agent_surface.contracts import ErrorOutcome, SuccessOutcome
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
 from agent_surface.operations import OperationDefinition, OperationError
-from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
+from agent_surface.outcomes import (
+    ActionProvider,
+    NoActions,
+    _provider_actions_for,
+    error_outcome,
+    success_outcome,
+)
 from agent_surface.references import InvalidReference, ReferenceError, ReferenceRegistry
 from agent_surface.rendering import RenderOptions, render
 
@@ -193,7 +199,8 @@ class MCPAdapter:
                 await self._app.operations._invoke_request_with_outcome(definition, request)
             ).result
             try:
-                actions = self._action_provider.actions_for(
+                actions = _provider_actions_for(
+                    self._action_provider,
                     operation=definition.name,
                     request=request,
                     result=result,
@@ -292,7 +299,8 @@ class MCPAdapter:
         )
         if include_actions:
             with suppress(Exception):
-                actions = self._action_provider.actions_for(
+                actions = _provider_actions_for(
+                    self._action_provider,
                     operation=operation,
                     request=request,
                     error=error,
