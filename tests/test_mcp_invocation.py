@@ -5,7 +5,14 @@ import pytest
 from mcp import Client
 from pydantic import BaseModel, Field
 
-from agent_surface import App, OperationError, OutputBudget, ReferenceRegistry, RenderOptions
+from agent_surface import (
+    App,
+    OperationError,
+    OperationOutcome,
+    OutputBudget,
+    ReferenceRegistry,
+    RenderOptions,
+)
 from agent_surface.adapters.mcp import MCPAdapter
 
 
@@ -49,6 +56,23 @@ async def test_call_tool_returns_authoritative_structured_success_and_yaml_text(
     assert result.structured_content["next_actions"]["items"] == []
     assert result.content[0].text.startswith("schema_version:")
     assert "ok: true" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_successful_negative_outcome_remains_an_mcp_success() -> None:
+    app = App("status")
+
+    @app.operation("operation.status")
+    def status(request: EchoRequest) -> OperationOutcome[EchoResult]:
+        return OperationOutcome(EchoResult(message=request.text), exit_code=1)
+
+    adapter = MCPAdapter(app)
+    async with Client(adapter.server, raise_exceptions=True) as client:
+        result = await client.call_tool("operation.status", {"text": "failed"})
+
+    assert result.is_error is False
+    assert result.structured_content["ok"] is True
+    assert result.structured_content["result"] == {"message": "failed"}
 
 
 @pytest.mark.asyncio

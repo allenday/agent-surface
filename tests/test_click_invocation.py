@@ -9,6 +9,7 @@ from agent_surface import (
     ActionCollection,
     App,
     OperationError,
+    OperationOutcome,
     OutputBudget,
     ReferenceRegistry,
     RenderOptions,
@@ -101,6 +102,20 @@ def test_async_handler_uses_the_same_registry_invocation_path() -> None:
 
     assert result.exit_code == 0
     assert document["result"] == {"doubled": 6}
+
+
+def test_successful_negative_outcome_renders_normally_with_its_exit_code() -> None:
+    app = App("status")
+
+    @app.operation("operation.status")
+    def status(request: EchoRequest) -> OperationOutcome[EchoResult]:
+        return OperationOutcome(EchoResult(message=request.text), exit_code=1)
+
+    result, document = invoke_json(app, ["operation", "status", "--text", "failed"])
+
+    assert result.exit_code == 1
+    assert document["ok"] is True
+    assert document["result"] == {"message": "failed"}
 
 
 def test_reference_token_decodes_before_pydantic_validation() -> None:

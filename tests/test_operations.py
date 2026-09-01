@@ -6,6 +6,7 @@ from agent_surface.operations import (
     DuplicateOperationError,
     OperationError,
     OperationInputError,
+    OperationOutcome,
     OperationOutputError,
     UnknownOperationError,
 )
@@ -103,6 +104,42 @@ async def test_domain_errors_pass_through_unchanged() -> None:
 
     assert caught.value.code == "not_found"
     assert caught.value.fix == "Choose another value."
+
+
+@pytest.mark.asyncio
+async def test_successful_outcome_preserves_result_and_process_exit_code() -> None:
+    app = App("calculator")
+
+    @app.operation("math.status")
+    def status(request: AddResult) -> OperationOutcome[AddResult]:
+        return OperationOutcome(AddResult(value=request.value), exit_code=1)
+
+    definition = app.operations.describe("math.status")
+    request = app.operations.validate(definition, {"value": 4})
+    invocation = await app.operations._invoke_request_with_outcome(definition, request)
+
+    assert invocation.result == AddResult(value=4)
+    assert invocation.exit_code == 1
+    assert await app.invoke("math.status", {"value": 4}) == AddResult(value=4)
+
+
+def test_successful_outcome_rejects_unsafe_exit_codes() -> None:
+    with pytest.raises(ValueError, match="0 through 125"):
+        OperationOutcome(AddResult(value=4), exit_code=126)
+
+
+@pytest.mark.asyncio
+async def test_declared_outcome_must_be_returned_by_the_handler() -> None:
+    app = App("calculator")
+
+    @app.operation("math.status")
+    def status(request: AddResult) -> OperationOutcome[AddResult]:
+        return request  # type: ignore[return-value]
+
+    with pytest.raises(OperationError, match="must return an OperationOutcome") as caught:
+        await app.invoke("math.status", {"value": 4})
+
+    assert caught.value.code == "invalid_outcome"
 
 
 @pytest.mark.asyncio

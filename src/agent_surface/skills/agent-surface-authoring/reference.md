@@ -5,7 +5,7 @@
 ```python
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_surface import App, OperationError, ReferenceRegistry
+from agent_surface import App, OperationError, OperationOutcome, ReferenceRegistry
 from agent_surface.adapters.click import build_click_group
 from agent_surface.adapters.mcp import MCPAdapter
 
@@ -63,6 +63,10 @@ def inspect_widget(request: InspectRequest) -> Widget:
 cli = build_click_group(app, references=references)
 mcp = MCPAdapter(app, references=references)
 ```
+
+For valid negative domain state that shell automation must distinguish, declare
+`-> OperationOutcome[Widget]` and return `OperationOutcome(widget, exit_code=1)`. Do not turn that
+result into `OperationError`: Click exits non-zero while MCP remains a successful tool call.
 
 `make_consumer_owned_service` and `WidgetMissing` are placeholders for the host application. The
 wrapper—not the domain layer—is the transport boundary.

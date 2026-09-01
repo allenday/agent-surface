@@ -135,7 +135,9 @@ class MCPAdapter:
         try:
             arguments = self._decode_references(definition, arguments)
             request = self._app.operations.validate(definition, arguments)
-            result = await self._app.operations.invoke_request(definition, request)
+            result = (
+                await self._app.operations._invoke_request_with_outcome(definition, request)
+            ).result
             try:
                 actions = self._action_provider.actions_for(
                     operation=definition.name,

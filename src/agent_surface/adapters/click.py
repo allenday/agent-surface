@@ -806,9 +806,14 @@ class ClickAdapter:
                 request=request,
             )
 
+        outcome_exit_code = 0
         try:
             request = self._app.operations.validate(definition, payload)
-            result = asyncio.run(self._app.operations.invoke_request(definition, request))
+            invocation = asyncio.run(
+                self._app.operations._invoke_request_with_outcome(definition, request)
+            )
+            result = invocation.result
+            outcome_exit_code = invocation.exit_code
             actions = self._action_provider.actions_for(
                 operation=plan.operation,
                 result=result,
@@ -916,6 +921,9 @@ class ClickAdapter:
                 definition=definition,
                 request=request,
             )
+
+        if outcome_exit_code:
+            raise click.exceptions.Exit(outcome_exit_code)
 
     def _payload(
         self,

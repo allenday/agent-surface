@@ -6,6 +6,7 @@ The public surface is organized around a few concepts:
 | --- | --- |
 | `App` | register and directly invoke typed operations |
 | `OperationError` | stable expected failure with repair guidance |
+| `OperationOutcome` | a valid result with an explicit non-zero process classification |
 | `ReferenceCodec`, `ReferenceRegistry` | encode, decode, and display domain references |
 | `Action`, `ActionCatalog`, `AllowActions` | describe and authorize bounded next steps |
 | `BoundedCollection`, `OutputBudget` | make omission and continuation explicit |
@@ -27,6 +28,24 @@ async def search(request: SearchRequest) -> SearchPage:
 Use `app.invoke("books.search", request)` for direct Python calls. Build a CLI with
 `build_click_group(app, references=references, action_provider=actions)`. Adapters are sibling
 projections; handlers never import Click or MCP.
+
+## Successful negative domain states
+
+Use `OperationOutcome` when the operation succeeded and returned valid domain state, but shell
+automation needs a non-zero status. Click projects the classification as the process exit code;
+MCP continues to report a successful tool call. `OperationError` remains for actual operation
+failures.
+
+```python
+from agent_surface import OperationOutcome
+
+@app.operation("operation.status", read_only=True)
+def status(request: StatusRequest) -> OperationOutcome[OperationStatusResult]:
+    return OperationOutcome(OperationStatusResult(state="failed"), exit_code=1)
+```
+
+Exit codes are bounded to `0` through `125`. Direct `app.invoke()` returns the contained typed
+result; adapters preserve the exit classification internally.
 
 MCP is an optional dependency:
 

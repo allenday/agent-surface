@@ -31,7 +31,9 @@ manager on the user's behalf. The user or repository owns that decision.
 1. Put strict Pydantic request and result models beside a thin integration wrapper around the domain
    service. Do not make domain classes inherit transport types.
 2. Create an `App`; register one `@app.operation` per stable dotted operation name. Keep handlers
-   small and translate expected domain failures to `OperationError(code, message, fix=...)`.
+   small and translate expected domain failures to `OperationError(code, message, fix=...)`. When
+   a valid domain result needs a non-zero CLI exit, return `OperationOutcome(result, exit_code=...)`
+   instead; MCP remains successful.
 3. Register a `ReferenceCodec` for every non-scalar object used in a request, result, or action.
    Encode a stable wire identifier, decode it explicitly, and never rely on `str(object)`.
 4. Return state-appropriate actions through an explicit provider and `AllowActions` policy. Every

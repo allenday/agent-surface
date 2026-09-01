@@ -1,7 +1,7 @@
 def test_package_exposes_version() -> None:
     import agent_surface
 
-    assert agent_surface.__version__ == "0.1.7"
+    assert agent_surface.__version__ == "0.1.8"
 
 
 def test_package_exposes_bounded_rendering_api() -> None:

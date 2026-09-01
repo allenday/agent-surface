@@ -1,6 +1,6 @@
 """Typed application surfaces for agents."""
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 from agent_surface.actions import (
     ActionCandidate,
@@ -40,7 +40,7 @@ from agent_surface.manifest import (
     verify_manifest,
     write_manifest,
 )
-from agent_surface.operations import OperationError
+from agent_surface.operations import OperationError, OperationOutcome
 from agent_surface.outcomes import ActionProvider, NoActions, error_outcome, success_outcome
 from agent_surface.references import (
     DuplicateReferenceCodec,
@@ -84,6 +84,7 @@ __all__ = [
     "installed_manifests",
     "MissingReferenceCodec",
     "OperationError",
+    "OperationOutcome",
     "load_manifest",
     "manifest_for",
     "NoActions",
