@@ -154,6 +154,8 @@ def test_public_docs_present_mcp_as_a_shipped_sibling_adapter() -> None:
         "confirmation",
         "annotations",
         "Click",
+        "MCPAdapter.compose",
+        "Duplicate tool",
     ):
         assert required in contract
 

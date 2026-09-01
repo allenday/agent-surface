@@ -15,6 +15,29 @@ from agent_surface.adapters.mcp import MCPAdapter
 adapter = MCPAdapter(app, references=references, action_provider=actions)
 ```
 
+## One server for multiple typed surfaces
+
+When an application is migrating operation families independently, compose existing adapters
+instead of adding a second MCP transport or reflecting another command tree. The outer adapter owns
+one SDK server; each tool call is dispatched to its source adapter, so that adapter retains its own
+reference codecs, action provider, renderer, output budget, confirmation gate, and error policy.
+
+```python
+from agent_surface.adapters.mcp import MCPAdapter
+
+catalog_mcp = MCPAdapter(catalog_app(), references=catalog_references)
+operations_mcp = MCPAdapter(operations_app(), action_provider=operations_actions)
+mcp = MCPAdapter.compose("infralink", catalog_mcp, operations_mcp, version="1.0.0")
+
+await mcp.run_stdio()
+```
+
+`compose()` lists the union of source tools in lexical order. Its `page_size` is a single global
+discovery bound for the composed server; source adapter page sizes do not apply. Duplicate tool
+names are rejected at composition time with `ValueError` rather than being selected by order.
+Composition is for public typed adapters only: do not mount Click commands, private runtime helpers,
+or another MCP server behind it.
+
 ## Tool discovery
 
 Each registered operation becomes one native MCP tool with its exact dotted name. Its description
