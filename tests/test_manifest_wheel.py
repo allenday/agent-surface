@@ -82,6 +82,8 @@ def test_hatch_builds_and_installs_a_verifiable_manifest(tmp_path: Path) -> None
     agent_surface_wheel = next(artifact_directory.glob("agent_surface-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         assert "demo_ops-1.0.0.dist-info/agent-surface-operations.json" in archive.namelist()
+    with zipfile.ZipFile(agent_surface_wheel) as archive:
+        assert "agent_surface/py.typed" in archive.namelist()
 
     environment = tmp_path / "environment"
     venv.EnvBuilder(with_pip=True).create(environment)
