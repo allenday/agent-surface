@@ -225,7 +225,7 @@ def test_input_and_domain_errors_are_structured_with_stable_exits() -> None:
     )
 
     assert invalid.exit_code == 2
-    assert invalid_document["error"]["code"] == "invalid_value"
+    assert invalid_document["error"]["code"] == "usage_error"
     assert missing.exit_code == 4
     assert missing_document["error"]["code"] == "message_missing"
     assert missing_document["fix"] == "Choose another message."
@@ -277,7 +277,7 @@ def test_click_parse_error_is_a_repairable_structured_document() -> None:
     result, document = invoke_json(echo_app(), ["message", "echo"])
 
     assert result.exit_code == 2
-    assert document["error"]["code"] == "missing_parameter"
+    assert document["error"]["code"] == "usage_error"
     assert document["command"]["raw"] == [
         "echo",
         "message",
@@ -467,7 +467,7 @@ def test_sensitive_bad_lexical_value_is_redacted_from_parse_error() -> None:
     )
 
     assert result.exit_code == 2
-    assert document["error"]["code"] == "invalid_value"
+    assert document["error"]["code"] == "usage_error"
     assert "not-a-secret-pin" not in result.output
 
 
@@ -1011,9 +1011,9 @@ def test_transport_confirmation_is_present_in_parsed_flags() -> None:
 @pytest.mark.parametrize(
     ("argument", "value", "error_code"),
     [
-        ("--score", "nan", "invalid_value"),
-        ("--score", "inf", "invalid_value"),
-        ("--score=-1e999", None, "unknown_option"),
+        ("--score", "nan", "usage_error"),
+        ("--score", "inf", "usage_error"),
+        ("--score=-1e999", None, "usage_error"),
     ],
 )
 def test_non_finite_float_is_rejected(

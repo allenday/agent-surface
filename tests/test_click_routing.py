@@ -139,7 +139,7 @@ def test_mounted_parse_error_uses_consumer_envelope_and_parent_output() -> None:
     assert json.loads(result.output) == {
         "schema_version": "consumer.cli/v1",
         "operation": "books.inspect",
-        "error_code": "invalid_value",
+        "error_code": "usage_error",
     }
 
 
@@ -174,7 +174,7 @@ def test_mounted_unknown_option_uses_consumer_envelope_and_parent_format() -> No
     assert json.loads(result.output) == {
         "schema_version": "consumer.cli/v1",
         "operation": "books.inspect",
-        "error_code": "unknown_option",
+        "error_code": "usage_error",
     }
 
 
@@ -303,4 +303,4 @@ def test_constrained_integer_option_preserves_pydantic_bounds_in_click(
     )
     assert invalid_result.exit_code == 2
     invalid_document = YAML(typ="safe").load(invalid_result.output)
-    assert invalid_document["error"]["code"] == "invalid_value"
+    assert invalid_document["error"]["code"] == "usage_error"
