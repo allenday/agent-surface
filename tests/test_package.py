@@ -4,7 +4,7 @@ from importlib.resources import files
 def test_package_exposes_version() -> None:
     import agent_surface
 
-    assert agent_surface.__version__ == "0.1.11"
+    assert agent_surface.__version__ == "0.1.12"
 
 
 def test_package_exposes_bounded_rendering_api() -> None:

@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -224,7 +225,7 @@ def test_input_and_domain_errors_are_structured_with_stable_exits() -> None:
     )
 
     assert invalid.exit_code == 2
-    assert invalid_document["error"]["code"] == "invalid_input"
+    assert invalid_document["error"]["code"] == "usage_error"
     assert missing.exit_code == 4
     assert missing_document["error"]["code"] == "message_missing"
     assert missing_document["fix"] == "Choose another message."
@@ -276,7 +277,7 @@ def test_click_parse_error_is_a_repairable_structured_document() -> None:
     result, document = invoke_json(echo_app(), ["message", "echo"])
 
     assert result.exit_code == 2
-    assert document["error"]["code"] == "missing_parameter"
+    assert document["error"]["code"] == "usage_error"
     assert document["command"]["raw"] == [
         "echo",
         "message",
@@ -294,7 +295,7 @@ def test_unknown_nested_command_is_a_repairable_structured_document() -> None:
     document = json.loads(result.stdout)
 
     assert result.exit_code == 2
-    assert document["error"]["code"] == "unknown_command"
+    assert document["error"]["code"] == "usage_error"
     assert document["command"]["raw"] == [
         "echo",
         "message",
@@ -466,7 +467,7 @@ def test_sensitive_bad_lexical_value_is_redacted_from_parse_error() -> None:
     )
 
     assert result.exit_code == 2
-    assert document["error"]["code"] == "invalid_value"
+    assert document["error"]["code"] == "usage_error"
     assert "not-a-secret-pin" not in result.output
 
 
@@ -824,6 +825,71 @@ def test_sensitive_boolean_in_arbitrary_detail_key_is_redacted() -> None:
     assert document["error"]["details"][0]["value"]["context"]["provided"] == "<redacted>"
 
 
+def test_omitted_sensitive_optional_none_does_not_redact_unrelated_none_values() -> None:
+    class Request(BaseModel):
+        registry: Path | None = None
+        edges: Path | None = None
+        bws_token: str | None = Field(default=None, json_schema_extra={"sensitive": True})
+
+    app = App("network")
+
+    @app.operation("config.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "inspection_failed",
+            "Configuration inspection failed",
+            details=({"request": request.model_dump()},),
+        )
+
+    result, document = invoke_json(
+        app,
+        ["config", "inspect", "--registry", "/registry"],
+    )
+
+    assert result.exit_code == 4
+    request = document["error"]["details"][0]["value"]["request"]
+    assert request == {
+        "registry": "/registry",
+        "edges": None,
+        "bws_token": "<redacted>",
+    }
+
+
+def test_omitted_sensitive_defaults_do_not_redact_matching_unrelated_values() -> None:
+    class Request(BaseModel):
+        edges: tuple[str, ...] = ()
+        dry_run: bool = False
+        bws_tokens: tuple[str, ...] = Field(
+            default=(),
+            json_schema_extra={"sensitive": True},
+        )
+        private_mode: bool = Field(
+            default=False,
+            json_schema_extra={"sensitive": True},
+        )
+
+    app = App("network")
+
+    @app.operation("config.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "inspection_failed",
+            "Configuration inspection failed",
+            details=({"request": request.model_dump()},),
+        )
+
+    result, document = invoke_json(app, ["config", "inspect"])
+
+    assert result.exit_code == 4
+    request = document["error"]["details"][0]["value"]["request"]
+    assert request == {
+        "edges": [],
+        "dry_run": False,
+        "bws_tokens": "<redacted>",
+        "private_mode": "<redacted>",
+    }
+
+
 def test_error_command_is_compacted_only_after_budget_failure() -> None:
     value = "x" * 300
     class LongRequest(BaseModel):
@@ -945,9 +1011,9 @@ def test_transport_confirmation_is_present_in_parsed_flags() -> None:
 @pytest.mark.parametrize(
     ("argument", "value", "error_code"),
     [
-        ("--score", "nan", "invalid_value"),
-        ("--score", "inf", "invalid_value"),
-        ("--score=-1e999", None, "unknown_option"),
+        ("--score", "nan", "usage_error"),
+        ("--score", "inf", "usage_error"),
+        ("--score=-1e999", None, "usage_error"),
     ],
 )
 def test_non_finite_float_is_rejected(
