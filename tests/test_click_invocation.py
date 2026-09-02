@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -822,6 +823,71 @@ def test_sensitive_boolean_in_arbitrary_detail_key_is_redacted() -> None:
 
     assert result.exit_code == 4
     assert document["error"]["details"][0]["value"]["context"]["provided"] == "<redacted>"
+
+
+def test_omitted_sensitive_optional_none_does_not_redact_unrelated_none_values() -> None:
+    class Request(BaseModel):
+        registry: Path | None = None
+        edges: Path | None = None
+        bws_token: str | None = Field(default=None, json_schema_extra={"sensitive": True})
+
+    app = App("network")
+
+    @app.operation("config.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "inspection_failed",
+            "Configuration inspection failed",
+            details=({"request": request.model_dump()},),
+        )
+
+    result, document = invoke_json(
+        app,
+        ["config", "inspect", "--registry", "/registry"],
+    )
+
+    assert result.exit_code == 4
+    request = document["error"]["details"][0]["value"]["request"]
+    assert request == {
+        "registry": "/registry",
+        "edges": None,
+        "bws_token": "<redacted>",
+    }
+
+
+def test_omitted_sensitive_defaults_do_not_redact_matching_unrelated_values() -> None:
+    class Request(BaseModel):
+        edges: tuple[str, ...] = ()
+        dry_run: bool = False
+        bws_tokens: tuple[str, ...] = Field(
+            default=(),
+            json_schema_extra={"sensitive": True},
+        )
+        private_mode: bool = Field(
+            default=False,
+            json_schema_extra={"sensitive": True},
+        )
+
+    app = App("network")
+
+    @app.operation("config.inspect")
+    def inspect(request: Request) -> EchoResult:
+        raise OperationError(
+            "inspection_failed",
+            "Configuration inspection failed",
+            details=({"request": request.model_dump()},),
+        )
+
+    result, document = invoke_json(app, ["config", "inspect"])
+
+    assert result.exit_code == 4
+    request = document["error"]["details"][0]["value"]["request"]
+    assert request == {
+        "edges": [],
+        "dry_run": False,
+        "bws_tokens": "<redacted>",
+        "private_mode": "<redacted>",
+    }
 
 
 def test_error_command_is_compacted_only_after_budget_failure() -> None:

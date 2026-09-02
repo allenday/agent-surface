@@ -65,6 +65,8 @@ class CliFieldPlan:
     required: bool
     multiple: bool = False
     choices: tuple[str, ...] = ()
+    minimum: int | None = None
+    maximum: int | None = None
     help: str = ""
     sensitive: bool = False
     reference_type: type[Any] | None = None
@@ -157,6 +159,7 @@ class CliPlanCompiler:
         annotation, _ = _unwrap_optional(field.annotation)
         item_annotation, multiple = _unwrap_collection(annotation)
         value_kind, choices, reference_type = self._value_shape(name, item_annotation)
+        minimum, maximum = _integer_bounds(field) if value_kind == "integer" else (None, None)
         extra = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
         cli_extra = extra.get("cli", {}) if isinstance(extra.get("cli", {}), dict) else {}
         kind = cli_extra.get("kind", "option")
@@ -212,6 +215,8 @@ class CliPlanCompiler:
             required=field.is_required(),
             multiple=multiple,
             choices=choices,
+            minimum=minimum,
+            maximum=maximum,
             help=field.description or "",
             sensitive=sensitive,
             reference_type=reference_type,
@@ -815,7 +820,7 @@ class ClickAdapter:
             transport_confirm=transport_confirm,
         )
         definition = self._app.operations.describe(plan.operation)
-        request: Any | None = None
+        request: BaseModel | None = None
         try:
             payload = self._payload(context, plan, params)
         except OperationError as error:
@@ -828,6 +833,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
         except ReferenceError as error:
             self._emit_error(
@@ -839,6 +845,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
         except Exception:
             self._emit_error(
@@ -854,6 +861,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
 
         confirmed = transport_confirm or payload.get("confirm") is True
@@ -871,6 +879,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
 
         outcome_exit_code = 0
@@ -899,7 +908,13 @@ class ClickAdapter:
                     self._envelope_renderer.render(
                         Invocation(
                             operation=definition,
-                            request=public_request(definition, request),
+                            request=public_request(
+                                definition,
+                                request,
+                                sensitive_values=self._sensitive_param_values(
+                                    context, plan, params
+                                ),
+                            ),
                             result=result,
                             error=None,
                             next_actions=actions,
@@ -928,7 +943,7 @@ class ClickAdapter:
                     error,
                     plan,
                     raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
-                    sensitive_values=self._sensitive_param_values(plan, params),
+                    sensitive_values=self._sensitive_param_values(context, plan, params),
                 ),
                 exit_code=2,
                 operation=plan.operation,
@@ -936,6 +951,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
         except OperationOutputError as error:
             self._emit_error(
@@ -947,6 +963,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
         except OperationError as error:
             self._emit_error(
@@ -955,7 +972,7 @@ class ClickAdapter:
                     error,
                     plan,
                     raw=tuple(context.meta.get(_RAW_ARGV_KEY, command.raw)),
-                    sensitive_values=self._sensitive_param_values(plan, params),
+                    sensitive_values=self._sensitive_param_values(context, plan, params),
                 ),
                 exit_code=self._exit_code_for(error),
                 operation=plan.operation,
@@ -963,6 +980,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
         except OutputBudgetExceeded as error:
             self._emit_error(
@@ -974,6 +992,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
         except Exception:
             self._emit_error(
@@ -989,6 +1008,7 @@ class ClickAdapter:
                 yaml_style=yaml_style,
                 definition=definition,
                 request=request,
+                sensitive_values=self._sensitive_param_values(context, plan, params),
             )
 
         if outcome_exit_code:
@@ -1088,6 +1108,7 @@ class ClickAdapter:
         yaml_style: str,
         definition: OperationDefinition | None = None,
         request: BaseModel | None = None,
+        sensitive_values: tuple[Any, ...] = (),
     ) -> typing.Never:
         try:
             actions = _provider_actions_for(
@@ -1105,7 +1126,11 @@ class ClickAdapter:
         if self._envelope_renderer is not None and definition is not None:
             invocation = Invocation(
                 operation=definition,
-                request=public_request(definition, request) if request is not None else None,
+                request=(
+                    public_request(definition, request, sensitive_values=sensitive_values)
+                    if request is not None
+                    else None
+                ),
                 result=None,
                 error=error,
                 next_actions=actions,
@@ -1206,11 +1231,16 @@ class ClickAdapter:
             raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
             parsed=ParsedCommand(path=plan.path),
         )
-        code = {
-            click.MissingParameter: "missing_parameter",
-            click.BadParameter: "invalid_value",
-            click.NoSuchOption: "unknown_option",
-        }.get(type(error), "invalid_command")
+        if isinstance(error, click.BadParameter) and isinstance(
+            getattr(error.param, "type", None), click.IntRange
+        ):
+            code = "invalid_input"
+        else:
+            code = {
+                click.MissingParameter: "missing_parameter",
+                click.BadParameter: "invalid_value",
+                click.NoSuchOption: "unknown_option",
+            }.get(type(error), "invalid_command")
         self._emit_error(
             command,
             OperationError(
@@ -1225,6 +1255,7 @@ class ClickAdapter:
             operation=plan.operation,
             document_format=document_format,
             yaml_style=yaml_style,
+            definition=self._app.operations.describe(plan.operation),
         )
 
     def _emit_group_parse_error(
@@ -1335,13 +1366,20 @@ class ClickAdapter:
 
     @staticmethod
     def _sensitive_param_values(
+        context: click.Context,
         plan: CliCommandPlan,
         params: dict[str, Any],
     ) -> tuple[Any, ...]:
         return tuple(
             params[field.name]
             for field in plan.fields
-            if field.sensitive and field.name in params
+            if field.sensitive
+            and field.name in params
+            and (
+                params[_stdin_parameter_name(field)]
+                if field.source == "stdin"
+                else context.get_parameter_source(field.name) is ParameterSource.COMMANDLINE
+            )
         )
 
 
@@ -1542,10 +1580,14 @@ def _render_choices_from_raw(raw: tuple[str, ...]) -> tuple[str, str]:
     document_format = "yaml"
     yaml_style = "auto"
     for index, token in enumerate(raw):
-        if token == "--format" and index + 1 < len(raw):
-            document_format = raw[index + 1]
-        elif token.startswith("--format="):
-            document_format = token.partition("=")[2]
+        if token in {"--format", "--output"} and index + 1 < len(raw):
+            candidate = raw[index + 1]
+            if candidate in {"yaml", "json"}:
+                document_format = candidate
+        elif token.startswith("--format=") or token.startswith("--output="):
+            candidate = token.partition("=")[2]
+            if candidate in {"yaml", "json"}:
+                document_format = candidate
         elif token == "--yaml-style" and index + 1 < len(raw):
             yaml_style = raw[index + 1]
         elif token.startswith("--yaml-style="):
@@ -1693,6 +1735,10 @@ def _read_stdin_field(field: CliFieldPlan) -> str:
 def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:
     if field.choices:
         return click.Choice(field.choices, case_sensitive=True)
+    if field.value_kind == "integer" and (
+        field.minimum is not None or field.maximum is not None
+    ):
+        return click.IntRange(min=field.minimum, max=field.maximum)
     return {
         "boolean": click.BOOL,
         "float": _FINITE_FLOAT,
@@ -1701,6 +1747,19 @@ def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:
         "reference": click.STRING,
         "string": click.STRING,
     }[field.value_kind]
+
+
+def _integer_bounds(field: Any) -> tuple[int | None, int | None]:
+    minimum: int | None = None
+    maximum: int | None = None
+    for constraint in field.metadata:
+        ge = getattr(constraint, "ge", None)
+        le = getattr(constraint, "le", None)
+        if type(ge) is int:
+            minimum = ge
+        if type(le) is int:
+            maximum = le
+    return minimum, maximum
 
 
 class _FiniteFloat(click.ParamType[float]):

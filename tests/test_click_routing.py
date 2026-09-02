@@ -1,13 +1,17 @@
+import json
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 import click
+import pytest
 from click.testing import CliRunner
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from ruamel.yaml import YAML
 
-from agent_surface import App
+from agent_surface import App, CanonicalEnvelopeRenderer, Invocation, OperationError
 from agent_surface.adapters.click import ClickAdapter, build_click_group
+from agent_surface.envelopes import public_request
 
 
 class Mode(StrEnum):
@@ -26,6 +30,22 @@ class Request(BaseModel):
 
 class Result(BaseModel):
     status: str
+
+
+class ConsumerEnvelope(BaseModel):
+    schema_version: Literal["consumer.cli/v1"] = "consumer.cli/v1"
+    operation: str
+    error_code: str | None
+
+
+class ConsumerRenderer(CanonicalEnvelopeRenderer):
+    output_model = ConsumerEnvelope
+
+    def render(self, invocation: Invocation) -> ConsumerEnvelope:
+        return ConsumerEnvelope(
+            operation=invocation.operation.name,
+            error_code=invocation.error.code if invocation.error is not None else None,
+        )
 
 
 def app() -> App:
@@ -88,6 +108,138 @@ def test_mounted_group_uses_explicit_provider_for_original_outer_argv() -> None:
     assert tuple(document["command"]["raw"]) == original
 
 
+def test_mounted_parse_error_uses_consumer_envelope_and_parent_output() -> None:
+    original = (
+        "root",
+        "--output",
+        "json",
+        "resolve",
+        "books",
+        "inspect",
+        "dune",
+        "--count",
+        "not-an-integer",
+    )
+    root = click.Group(
+        "root",
+        params=[click.Option(("--output",), type=click.Choice(("yaml", "json")))],
+    )
+    root.add_command(
+        ClickAdapter(
+            app(),
+            argv_provider=lambda: original,
+            envelope_renderer=ConsumerRenderer(),
+        ).command(),
+        name="resolve",
+    )
+
+    result = CliRunner().invoke(root, list(original[1:]))
+
+    assert result.exit_code == 2
+    assert json.loads(result.output) == {
+        "schema_version": "consumer.cli/v1",
+        "operation": "books.inspect",
+        "error_code": "invalid_value",
+    }
+
+
+def test_mounted_unknown_option_uses_consumer_envelope_and_parent_format() -> None:
+    original = (
+        "root",
+        "--format",
+        "json",
+        "resolve",
+        "books",
+        "inspect",
+        "dune",
+        "--unknown-option",
+        "value",
+    )
+    root = click.Group(
+        "root",
+        params=[click.Option(("--format",), type=click.Choice(("yaml", "json")))],
+    )
+    root.add_command(
+        ClickAdapter(
+            app(),
+            argv_provider=lambda: original,
+            envelope_renderer=ConsumerRenderer(),
+        ).command(),
+        name="resolve",
+    )
+
+    result = CliRunner().invoke(root, list(original[1:]))
+
+    assert result.exit_code == 2
+    assert json.loads(result.output) == {
+        "schema_version": "consumer.cli/v1",
+        "operation": "books.inspect",
+        "error_code": "unknown_option",
+    }
+
+
+def test_public_request_does_not_redact_unrelated_default_none_values() -> None:
+    class SensitiveRequest(BaseModel):
+        registry: Path | None = None
+        token: str | None = Field(default=None, json_schema_extra={"sensitive": True})
+
+    surface = App("network")
+
+    @surface.operation("config.inspect")
+    def inspect(request: SensitiveRequest) -> Result:
+        return Result(status=str(request.registry))
+
+    definition = surface.operations.describe("config.inspect")
+
+    assert public_request(definition, SensitiveRequest()) == {
+        "registry": None,
+        "token": "<redacted>",
+    }
+
+
+def test_canonical_error_redacts_non_sensitive_value_equal_to_supplied_secret() -> None:
+    class SensitiveRequest(BaseModel):
+        token: str = Field(json_schema_extra={"sensitive": True})
+        mirror: str
+
+    class ErrorEnvelope(BaseModel):
+        request: dict[str, str] | None
+
+    class ErrorRenderer(CanonicalEnvelopeRenderer):
+        output_model = ErrorEnvelope
+
+        def render(self, invocation: Invocation) -> ErrorEnvelope:
+            return ErrorEnvelope(
+                request=(dict(invocation.request) if invocation.request is not None else None)
+            )
+
+    surface = App("network")
+
+    @surface.operation("config.inspect")
+    def inspect(request: SensitiveRequest) -> Result:
+        raise OperationError("inspection_failed", "Configuration inspection failed")
+
+    result = CliRunner().invoke(
+        ClickAdapter(surface, envelope_renderer=ErrorRenderer()).command(),
+        [
+            "config",
+            "inspect",
+            "--token",
+            "top-secret",
+            "--mirror",
+            "top-secret",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 4
+    assert "top-secret" not in result.output
+    assert json.loads(result.output) == {
+        "request": {"token": "<redacted>", "mirror": "<redacted>"},
+    }
+
+
 def test_generated_click_parameter_shapes_match_the_compiled_plan() -> None:
     root = ClickAdapter(app()).command()
     books = root.commands["books"]
@@ -105,3 +257,50 @@ def test_generated_click_parameter_shapes_match_the_compiled_plan() -> None:
     assert isinstance(parameters["mode"].type, click.Choice)
     assert parameters["mode"].type.choices == ("fast", "safe")
     assert isinstance(parameters["output"].type, click.Path)
+
+
+@pytest.mark.parametrize(
+    ("bounds", "expected_min", "expected_max", "invalid_value"),
+    [
+        ({"ge": 1, "le": 3}, 1, 3, "0"),
+        ({"ge": 1}, 1, None, "0"),
+        ({"le": 3}, None, 3, "4"),
+    ],
+)
+def test_constrained_integer_option_preserves_pydantic_bounds_in_click(
+    bounds: dict[str, int],
+    expected_min: int | None,
+    expected_max: int | None,
+    invalid_value: str,
+) -> None:
+    request_model = create_model(
+        "ConstrainedIntegerRequest",
+        value=(int, Field(default=2, **bounds)),
+    )
+    app = App("numbers")
+
+    @app.operation("numbers.check")
+    def check(request: request_model) -> Result:  # type: ignore[valid-type]
+        return Result(status=str(request.value))
+
+    command = build_click_group(app)
+    numbers = command.commands["numbers"]
+    assert isinstance(numbers, click.Group)
+    check_command = numbers.commands["check"]
+    value = next(parameter for parameter in check_command.params if parameter.name == "value")
+
+    assert isinstance(value.type, click.IntRange)
+    assert value.type.min == expected_min
+    assert value.type.max == expected_max
+
+    help_result = CliRunner().invoke(command, ["numbers", "check", "--help"])
+    assert help_result.exit_code == 0
+    assert "--value INTEGER RANGE" in help_result.output
+
+    invalid_result = CliRunner().invoke(
+        command,
+        ["numbers", "check", "--value", invalid_value, "--format", "json"],
+    )
+    assert invalid_result.exit_code == 2
+    invalid_document = YAML(typ="safe").load(invalid_result.output)
+    assert invalid_document["error"]["code"] == "invalid_input"

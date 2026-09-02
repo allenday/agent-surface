@@ -49,6 +49,8 @@ class CanonicalEnvelopeRenderer(Protocol):
 def public_request(
     definition: OperationDefinition,
     request: BaseModel,
+    *,
+    sensitive_values: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     """Produce the safe request view available to public envelope renderers."""
     sensitive = {
@@ -58,8 +60,6 @@ def public_request(
         and field.json_schema_extra.get("sensitive") is True
     }
     document = request.model_dump(mode="json")
-    sensitive_values = tuple(document[name] for name in sensitive if name in document)
-
     def redact(value: Any, key: str | None = None) -> Any:
         if key in sensitive:
             return _REDACTED
