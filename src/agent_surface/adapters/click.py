@@ -1256,15 +1256,10 @@ class ClickAdapter:
     ) -> typing.Never:
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
         document_format, yaml_style = _render_choices_from_raw(raw)
-        code = (
-            "unknown_command"
-            if "No such command" in error.format_message()
-            else "invalid_command"
-        )
         self._emit_error(
             CommandView(raw=raw, parsed=ParsedCommand(path=path)),
             OperationError(
-                code,
+                "usage_error",
                 error.format_message(),
                 fix=f"Run {self._app.name} operations list to discover valid commands.",
             ),
@@ -1282,15 +1277,10 @@ class ClickAdapter:
     ) -> typing.Never:
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
         document_format, yaml_style = _render_choices_from_raw(raw)
-        code = {
-            click.MissingParameter: "missing_parameter",
-            click.BadParameter: "invalid_value",
-            click.NoSuchOption: "unknown_option",
-        }.get(type(error), "invalid_command")
         self._emit_error(
             CommandView(raw=raw, parsed=ParsedCommand(path=path)),
             OperationError(
-                code,
+                "usage_error",
                 error.format_message(),
                 fix=f"Run {self._app.name} {path[0]} --help for valid usage.",
             ),

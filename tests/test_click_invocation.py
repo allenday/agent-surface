@@ -295,7 +295,7 @@ def test_unknown_nested_command_is_a_repairable_structured_document() -> None:
     document = json.loads(result.stdout)
 
     assert result.exit_code == 2
-    assert document["error"]["code"] == "unknown_command"
+    assert document["error"]["code"] == "usage_error"
     assert document["command"]["raw"] == [
         "echo",
         "message",
