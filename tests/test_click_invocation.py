@@ -225,7 +225,7 @@ def test_input_and_domain_errors_are_structured_with_stable_exits() -> None:
     )
 
     assert invalid.exit_code == 2
-    assert invalid_document["error"]["code"] == "invalid_input"
+    assert invalid_document["error"]["code"] == "invalid_value"
     assert missing.exit_code == 4
     assert missing_document["error"]["code"] == "message_missing"
     assert missing_document["fix"] == "Choose another message."

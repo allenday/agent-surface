@@ -1231,16 +1231,11 @@ class ClickAdapter:
             raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
             parsed=ParsedCommand(path=plan.path),
         )
-        if isinstance(error, click.BadParameter) and isinstance(
-            getattr(error.param, "type", None), click.IntRange
-        ):
-            code = "invalid_input"
-        else:
-            code = {
-                click.MissingParameter: "missing_parameter",
-                click.BadParameter: "invalid_value",
-                click.NoSuchOption: "unknown_option",
-            }.get(type(error), "invalid_command")
+        code = {
+            click.MissingParameter: "missing_parameter",
+            click.BadParameter: "invalid_value",
+            click.NoSuchOption: "unknown_option",
+        }.get(type(error), "invalid_command")
         self._emit_error(
             command,
             OperationError(

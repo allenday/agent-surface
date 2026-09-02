@@ -303,4 +303,4 @@ def test_constrained_integer_option_preserves_pydantic_bounds_in_click(
     )
     assert invalid_result.exit_code == 2
     invalid_document = YAML(typ="safe").load(invalid_result.output)
-    assert invalid_document["error"]["code"] == "invalid_input"
+    assert invalid_document["error"]["code"] == "invalid_value"
