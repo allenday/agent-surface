@@ -202,7 +202,7 @@ def validate_manifests(manifests: Sequence[Mapping[str, Any]]) -> None:
             raise ManifestCollision(f"Operation path collision: {' '.join(path)}")
 
 
-def verify_manifest(app: App, manifest: Mapping[str, Any]) -> None:
+def verify_manifest(app: App | ComposedApp, manifest: Mapping[str, Any]) -> None:
     """Fail closed unless an explicitly imported app exactly matches its artifact."""
     factory = manifest.get("factory")
     distribution = manifest.get("distribution")

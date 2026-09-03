@@ -4,8 +4,8 @@ import base64
 import binascii
 import json
 from contextlib import suppress
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -70,6 +70,13 @@ class MCPAdapter:
                 "structured error can always be emitted"
             )
         self._page_size = page_size
+        self._composition_defaults = {
+            "page_size": page_size,
+            "references": references,
+            "action_provider": action_provider,
+            "render_options": render_options,
+            "envelope_renderer": envelope_renderer,
+        }
         self._plans: tuple[MCPToolPlan, ...]
         self._definitions: dict[str, OperationDefinition]
         self._composed_adapters: dict[str, tuple[MCPAdapter, str]] | None = None
@@ -82,7 +89,13 @@ class MCPAdapter:
                 if key in mounted:
                     continue
                 mounted.add(key)
-                adapter = MCPAdapter(route.app, page_size=page_size, **dict(route.options))
+                options = {
+                    name: value
+                    for name, value in self._composition_defaults.items()
+                    if value is not None
+                }
+                options.update(route.options)
+                adapter = MCPAdapter(route.app, **cast(Any, options))
                 for plan in adapter._plans:
                     public_name = ".".join((*route.mount_path, *plan.operation.split(".")))
                     dispatch[public_name] = (adapter, plan.operation)
@@ -194,18 +207,29 @@ class MCPAdapter:
         self,
         context: Any,
         params: types.CallToolRequestParams,
+        *,
+        public_operation: str | None = None,
     ) -> types.CallToolResult:
         if self._composed_adapters is not None:
             mounted = self._composed_adapters.get(params.name)
             if mounted is None:
                 raise MCPError(types.INVALID_PARAMS, f"Unknown tool: {params.name}")
             adapter, operation = mounted
-            return await adapter._call_tool(context, params.model_copy(update={"name": operation}))
+            return await adapter._call_tool(
+                context,
+                params.model_copy(update={"name": operation}),
+                public_operation=params.name,
+            )
         del context
         assert isinstance(self._app, App)
-        definition = self._definitions.get(params.name)
-        if definition is None:
+        source_definition = self._definitions.get(params.name)
+        if source_definition is None:
             raise MCPError(types.INVALID_PARAMS, f"Unknown tool: {params.name}")
+        definition = (
+            replace(source_definition, name=public_operation)
+            if public_operation is not None
+            else source_definition
+        )
         arguments = dict(params.arguments or {})
         confirm_field = definition.input_model.model_fields.get("confirm")
         confirmed = arguments.get("confirm") is True
