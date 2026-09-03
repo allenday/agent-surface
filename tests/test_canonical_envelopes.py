@@ -68,6 +68,21 @@ class ConsumerRenderer(CanonicalEnvelopeRenderer):
         )
 
 
+class FixEnvelope(BaseModel):
+    operation: str
+    fix: str | None
+
+
+class FixRenderer(CanonicalEnvelopeRenderer):
+    output_model = FixEnvelope
+
+    def render(self, invocation: Invocation) -> FixEnvelope:
+        return FixEnvelope(
+            operation=invocation.operation.name,
+            fix=invocation.error.fix if invocation.error is not None else None,
+        )
+
+
 class CommandEnvelope(ConsumerEnvelope):
     command: dict[str, object] | None
 
@@ -167,7 +182,7 @@ def test_composed_click_canonical_parse_error_uses_public_operation_name() -> No
 
     command = build_click_group(
         ComposedApp("infralink").mount(
-            "diagram", child, click={"envelope_renderer": ConsumerRenderer()}
+            "diagram", child, click={"envelope_renderer": FixRenderer()}
         ),
     )
 
@@ -179,7 +194,7 @@ def test_composed_click_canonical_parse_error_uses_public_operation_name() -> No
     assert result.exit_code == 2, result.output
     document = json.loads(result.output)
     assert document["operation"] == "diagram.project"
-    assert document["error_code"] == "usage_error"
+    assert document["fix"] == "Run infralink operations describe diagram.project."
 
 
 def test_custom_canonical_envelope_projects_same_expected_error_through_click_and_mcp() -> None:

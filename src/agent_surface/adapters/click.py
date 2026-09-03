@@ -435,8 +435,10 @@ class ClickAdapter:
         argv_provider: Callable[[], Sequence[str]] | None = None,
         envelope_renderer: CanonicalEnvelopeRenderer | None = None,
         operation_error_exit_code: Callable[[str], int] | None = None,
+        public_app_name: str | None = None,
     ) -> None:
         self._app = app
+        self._public_app_name = public_app_name or app.name
         self._references = references or ReferenceRegistry()
         self._action_provider = action_provider or NoActions()
         self._render_options = render_options or RenderOptions()
@@ -1278,7 +1280,7 @@ class ClickAdapter:
                     error.format_message(),
                     _sensitive_raw_values(raw, plan, extra_fields=self._shared_fields),
                 ),
-                fix=f"Run {self._app.name} operations describe {plan.operation}.",
+                fix=f"Run {self._public_app_name} operations describe {public_operation}.",
             ),
             exit_code=2,
             operation=public_operation,
@@ -1466,7 +1468,11 @@ class ComposedClickAdapter:
             mounted.add(key)
             options = {name: value for name, value in self._defaults.items() if value is not None}
             options.update(route.click_options)
-            command = ClickAdapter(route.app, **options).command()
+            command = ClickAdapter(
+                route.app,
+                public_app_name=self._app.name,
+                **options,
+            ).command()
             _repath_surface_commands(command, route.mount_path)
             command.name = route.mount_path[-1]
             parent: click.Group = root
