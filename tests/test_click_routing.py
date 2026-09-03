@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from pydantic import BaseModel, Field, create_model
 from ruamel.yaml import YAML
 
-from agent_surface import App, CanonicalEnvelopeRenderer, Invocation, OperationError
+from agent_surface import App, CanonicalEnvelopeRenderer, ComposedApp, Invocation, OperationError
 from agent_surface.adapters.click import ClickAdapter, build_click_group
 from agent_surface.envelopes import public_request
 
@@ -80,6 +80,66 @@ def test_generated_group_mounts_beneath_a_consumer_owned_group() -> None:
 
     assert result.exit_code == 0
     assert "Inspect one book" in result.output
+
+
+class RenderShared(BaseModel):
+    profile: str
+
+
+class ProjectShared(BaseModel):
+    region: str
+
+
+class RenderRequest(RenderShared):
+    value: str
+
+
+class ProjectRequest(ProjectShared):
+    target: str
+
+
+def test_composed_click_tree_keeps_child_shared_inputs_local() -> None:
+    render_app = App("render", shared_input_model=RenderShared)
+    project_app = App("project", shared_input_model=ProjectShared)
+
+    @render_app.operation("render")
+    def render_diagram(request: RenderRequest) -> Result:
+        return Result(status=f"{request.profile}:{request.value}")
+
+    @project_app.operation("build")
+    def build_project(request: ProjectRequest) -> Result:
+        return Result(status=f"{request.region}:{request.target}")
+
+    surface = (
+        ComposedApp("infralink")
+        .mount("diagram", render_app)
+        .mount("diagram.project", project_app)
+    )
+
+    command = build_click_group(surface)
+
+    render_result = CliRunner().invoke(
+        command, ["diagram", "--profile", "draft", "render", "--value", "topology"]
+    )
+    project_result = CliRunner().invoke(
+        command,
+        ["diagram", "project", "--region", "us-east-1", "build", "--target", "alpha"],
+    )
+    invalid_result = CliRunner().invoke(
+        command, ["diagram", "render", "--region", "us-east-1", "--value", "topology"]
+    )
+
+    assert render_result.exit_code == 0
+    assert YAML(typ="safe").load(render_result.stdout)["result"] == {
+        "status": "draft:topology"
+    }
+    assert project_result.exit_code == 0
+    assert YAML(typ="safe").load(project_result.stdout)["result"] == {
+        "status": "us-east-1:alpha"
+    }
+    invalid_document = YAML(typ="safe").load(invalid_result.stdout)
+    assert invalid_result.exit_code == 2
+    assert invalid_document["error"]["code"] == "usage_error"
 
 
 def test_mounted_group_uses_explicit_provider_for_original_outer_argv() -> None:

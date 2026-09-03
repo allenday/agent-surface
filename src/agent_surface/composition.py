@@ -18,6 +18,7 @@ class MountedOperation:
     """One child operation at its deterministic public path."""
 
     public_path: tuple[str, ...]
+    mount_path: tuple[str, ...]
     app: App
     operation: OperationDefinition
     options: Mapping[str, Any]
@@ -45,6 +46,7 @@ class ComposedApp:
         candidates = [
             MountedOperation(
                 public_path=(*segments, *_operation_segments(definition.name)),
+                mount_path=segments,
                 app=app,
                 operation=definition,
                 options=MappingProxyType(dict(options)),

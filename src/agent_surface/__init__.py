@@ -17,6 +17,7 @@ from agent_surface.actions import (
 )
 from agent_surface.app import App
 from agent_surface.budgets import BoundedCollection, OutputBudget, OutputBudgetExceeded
+from agent_surface.composition import ComposedApp, CompositionError, MountedOperation
 from agent_surface.contracts import (
     Action,
     ActionCollection,
@@ -28,7 +29,6 @@ from agent_surface.contracts import (
     SuccessEnvelope,
     SuccessOutcome,
 )
-from agent_surface.composition import ComposedApp, CompositionError, MountedOperation
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation
 from agent_surface.manifest import (
     ManifestCollision,

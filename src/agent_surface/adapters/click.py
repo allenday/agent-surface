@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from agent_surface.actions import InvalidActionCursor
 from agent_surface.app import App
 from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
+from agent_surface.composition import ComposedApp
 from agent_surface.contracts import CommandView, ErrorEnvelope, ParsedCommand, SuccessEnvelope
 from agent_surface.discovery import OperationCatalog
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
@@ -1038,7 +1039,7 @@ class ClickAdapter:
         return payload
 
     def _shared_payload(self, context: click.Context) -> dict[str, Any]:
-        root = context.find_root()
+        root = self._surface_context(context)
         payload: dict[str, Any] = {}
         for field in self._shared_fields:
             if root.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
@@ -1066,7 +1067,7 @@ class ClickAdapter:
         arguments: dict[str, Any] = {}
         options: dict[str, Any] = {}
         flags = []
-        root = context.find_root()
+        root = self._surface_context(context)
         for field in self._shared_fields:
             if root.get_parameter_source(field.name) is ParameterSource.COMMANDLINE:
                 options[field.name] = _REDACTED if field.sensitive else root.params[field.name]
@@ -1096,6 +1097,15 @@ class ClickAdapter:
                 flags=tuple(flags),
             ),
         )
+
+    def _surface_context(self, context: click.Context) -> click.Context:
+        current: click.Context | None = context
+        while current is not None:
+            command = current.command
+            if isinstance(command, _SurfaceGroup) and command._adapter is self:
+                return current
+            current = current.parent
+        raise AssertionError("Click adapter context is not mounted in its command tree")
 
     def _emit_error(
         self,
@@ -1364,13 +1374,21 @@ class ClickAdapter:
 
 
 def build_click_group(
-    app: App,
+    app: App | ComposedApp,
     *,
     references: ReferenceRegistry | None = None,
     action_provider: ActionProvider | None = None,
     render_options: RenderOptions | None = None,
     argv_provider: Callable[[], Sequence[str]] | None = None,
 ) -> click.Group:
+    if isinstance(app, ComposedApp):
+        return ComposedClickAdapter(
+            app,
+            references=references,
+            action_provider=action_provider,
+            render_options=render_options,
+            argv_provider=argv_provider,
+        ).command()
     return ClickAdapter(
         app,
         references=references,
@@ -1378,6 +1396,73 @@ def build_click_group(
         render_options=render_options,
         argv_provider=argv_provider,
     ).command()
+
+
+class ComposedClickAdapter:
+    """Mount independently configured Click projections into one command tree."""
+
+    def __init__(
+        self,
+        app: ComposedApp,
+        *,
+        references: ReferenceRegistry | None = None,
+        action_provider: ActionProvider | None = None,
+        render_options: RenderOptions | None = None,
+        argv_provider: Callable[[], Sequence[str]] | None = None,
+    ) -> None:
+        self._app = app
+        self._defaults: dict[str, Any] = {
+            "references": references,
+            "action_provider": action_provider,
+            "render_options": render_options,
+            "argv_provider": argv_provider,
+        }
+
+    def command(self) -> click.Group:
+        root = click.Group(
+            self._app.name,
+            help=f"{self._app.name} composed agent surface",
+            context_settings={"help_option_names": ["-h", "--help"]},
+        )
+        mounted: set[tuple[tuple[str, ...], int]] = set()
+        for route in sorted(
+            self._app.operations(),
+            key=lambda item: (len(item.mount_path), item.mount_path, item.public_path),
+        ):
+            key = (route.mount_path, id(route.app))
+            if key in mounted:
+                continue
+            mounted.add(key)
+            options = {
+                name: value
+                for name, value in self._defaults.items()
+                if value is not None
+            }
+            options.update(route.options)
+            command = ClickAdapter(route.app, **options).command()
+            command.name = route.mount_path[-1]
+            parent = root
+            for segment in route.mount_path[:-1]:
+                existing = parent.commands.get(segment)
+                if existing is None:
+                    group = click.Group(segment)
+                    parent.add_command(group)
+                    parent = group
+                elif isinstance(existing, click.Group):
+                    _relax_group_requirements(existing)
+                    parent = existing
+                else:  # pragma: no cover - composition rejects leaf collisions
+                    raise AssertionError("composed command path became ambiguous")
+            parent.add_command(command)
+        return root
+
+
+def _relax_group_requirements(group: click.Group) -> None:
+    """Allow a mounted child namespace to contain another independently typed App."""
+
+    for parameter in group.params:
+        if isinstance(parameter, click.Option):
+            parameter.required = False
 
 
 class _SurfaceGroup(click.Group):
