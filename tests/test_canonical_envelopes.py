@@ -13,12 +13,13 @@ from pydantic import BaseModel, Field
 from agent_surface import (
     App,
     CanonicalEnvelopeRenderer,
+    ComposedApp,
     Invocation,
     OperationError,
     OutputBudget,
     RenderOptions,
 )
-from agent_surface.adapters.click import ClickAdapter
+from agent_surface.adapters.click import ClickAdapter, build_click_group
 from agent_surface.adapters.mcp import MCPAdapter
 
 
@@ -133,6 +134,28 @@ def test_custom_canonical_envelope_projects_same_success_through_click_and_mcp()
     }
     assert click_document == expected
     assert mcp_document == expected
+
+
+def test_composed_click_canonical_renderer_receives_public_operation_name() -> None:
+    child = App("diagram")
+
+    @child.operation("project", read_only=True)
+    def project(request: EchoRequest) -> EchoResult:
+        return EchoResult(message=request.text)
+
+    command = build_click_group(
+        ComposedApp("infralink").mount(
+            "diagram", child, click={"envelope_renderer": ConsumerRenderer()}
+        ),
+    )
+
+    result = CliRunner().invoke(
+        command,
+        ["diagram", "project", "--text", "hello", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["operation"] == "diagram.project"
 
 
 def test_custom_canonical_envelope_projects_same_expected_error_through_click_and_mcp() -> None:

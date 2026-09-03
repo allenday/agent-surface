@@ -818,6 +818,8 @@ class ClickAdapter:
         )
         document_format, yaml_style = _render_choices_from_raw(command.raw)
         definition = self._app.operations.describe(plan.operation)
+        public_operation = ".".join(plan.path)
+        public_definition = replace(definition, name=public_operation)
         request: BaseModel | None = None
         missing_shared = tuple(
             field
@@ -836,10 +838,10 @@ class ClickAdapter:
                     fix=f"Provide {option} and retry.",
                 ),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
             )
         try:
             payload = self._payload(context, plan, params)
@@ -848,10 +850,10 @@ class ClickAdapter:
                 command,
                 error,
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -860,10 +862,10 @@ class ClickAdapter:
                 command,
                 OperationError(error.code, str(error), fix=error.fix),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -876,10 +878,10 @@ class ClickAdapter:
                     fix="Use a reference returned by discovery.",
                 ),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -894,10 +896,10 @@ class ClickAdapter:
                     fix="Retry with --confirm after reviewing the target.",
                 ),
                 exit_code=3,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -912,7 +914,7 @@ class ClickAdapter:
             outcome_exit_code = invocation.exit_code
             actions = _provider_actions_for(
                 self._action_provider,
-                operation=plan.operation,
+                operation=public_operation,
                 request=request,
                 result=result,
             )
@@ -927,7 +929,7 @@ class ClickAdapter:
                 envelope = self._envelope_renderer.output_model.model_validate(
                     self._envelope_renderer.render(
                         Invocation(
-                            operation=definition,
+                            operation=public_definition,
                             request=public_request(
                                 definition,
                                 request,
@@ -966,10 +968,10 @@ class ClickAdapter:
                     sensitive_values=self._sensitive_param_values(context, plan, params),
                 ),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -978,10 +980,10 @@ class ClickAdapter:
                 command,
                 error,
                 exit_code=70,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -995,10 +997,10 @@ class ClickAdapter:
                     sensitive_values=self._sensitive_param_values(context, plan, params),
                 ),
                 exit_code=self._exit_code_for(error),
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -1007,10 +1009,10 @@ class ClickAdapter:
                 _compact_command(command),
                 OperationError(error.code, str(error), details=(error.details,), fix=error.fix),
                 exit_code=70,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -1023,10 +1025,10 @@ class ClickAdapter:
                     fix="Retry or inspect application diagnostics.",
                 ),
                 exit_code=70,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )

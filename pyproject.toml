@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-surface"
-version = "0.2.0"
+version = "0.2.1"
 description = "Project typed Python operations as agent-friendly CLIs, MCP tools, and schemas"
 readme = "README.md"
 requires-python = ">=3.12"
