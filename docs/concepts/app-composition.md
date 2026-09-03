@@ -8,7 +8,7 @@ the child schemas.
 The executable [composition example](../../examples/composition.py) builds a surface with both
 Click and MCP projections.
 
-The public CLI paths are `diagram ...` and `diagram project ...`; MCP tool names use the same
+The public CLI paths are `diagram ...` and `project ...`; MCP tool names use the same
 dot-separated paths. A field shared by `diagram_app` is accepted only by its operations. It is not
 silently inherited by `project_app`.
 
