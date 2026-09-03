@@ -94,7 +94,7 @@ class MCPAdapter:
                     for name, value in self._composition_defaults.items()
                     if value is not None
                 }
-                options.update(route.options)
+                options.update(route.mcp_options)
                 adapter = MCPAdapter(route.app, **cast(Any, options))
                 for plan in adapter._plans:
                     public_name = ".".join((*route.mount_path, *plan.operation.split(".")))

@@ -21,7 +21,8 @@ class MountedOperation:
     mount_path: tuple[str, ...]
     app: App
     operation: OperationDefinition
-    options: Mapping[str, Any]
+    click_options: Mapping[str, Any]
+    mcp_options: Mapping[str, Any]
 
     @property
     def public_name(self) -> str:
@@ -40,7 +41,9 @@ class ComposedApp:
         self,
         prefix: str | tuple[str, ...],
         app: App,
-        **options: Any,
+        *,
+        click: Mapping[str, Any] | None = None,
+        mcp: Mapping[str, Any] | None = None,
     ) -> "ComposedApp":
         segments = _prefix_segments(prefix)
         candidates = [
@@ -49,7 +52,8 @@ class ComposedApp:
                 mount_path=segments,
                 app=app,
                 operation=definition,
-                options=MappingProxyType(dict(options)),
+                click_options=MappingProxyType(dict(click or {})),
+                mcp_options=MappingProxyType(dict(mcp or {})),
             )
             for definition in app.operations.list()
         ]

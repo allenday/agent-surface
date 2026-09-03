@@ -55,17 +55,17 @@ def test_composed_app_copies_immutable_options_for_each_route() -> None:
     surface = ComposedApp("infralink").mount(
         "diagram",
         child("render", "render"),
-        output="yaml",
+        click={"render_options": "yaml"},
     )
-    second = surface.mount("project", child("project", "run"), output="json")
+    second = surface.mount("project", child("project", "run"), mcp={"page_size": 1})
 
     first_route, second_route = second.operations()
 
     with pytest.raises(TypeError):
-        first_route.options["output"] = "json"  # type: ignore[index]
-    assert first_route.options is not second_route.options
-    assert first_route.options == {"output": "yaml"}
-    assert second_route.options == {"output": "json"}
+        first_route.click_options["render_options"] = "json"  # type: ignore[index]
+    assert first_route.click_options is not second_route.mcp_options
+    assert first_route.click_options == {"render_options": "yaml"}
+    assert second_route.mcp_options == {"page_size": 1}
 
 
 @pytest.mark.parametrize("operation", ["", "render.", "render..detail"])

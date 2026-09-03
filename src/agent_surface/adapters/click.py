@@ -1467,7 +1467,7 @@ class ComposedClickAdapter:
                 for name, value in self._defaults.items()
                 if value is not None
             }
-            options.update(route.options)
+            options.update(route.click_options)
             command = ClickAdapter(route.app, **options).command()
             _repath_surface_commands(command, route.mount_path)
             command.name = route.mount_path[-1]
