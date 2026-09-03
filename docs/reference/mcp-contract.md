@@ -26,7 +26,8 @@ adapter = MCPAdapter(surface)
 ```
 
 Mount-specific MCP settings belong in `mcp={...}`; Click settings belong in `click={...}`. The
-two option mappings never cross a transport boundary.
+two option mappings never cross a transport boundary. Tool pagination is global to
+`MCPAdapter(surface, page_size=...)` and is therefore not accepted on an individual mount.
 
 ## One server for multiple typed surfaces
 

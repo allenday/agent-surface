@@ -45,6 +45,10 @@ class ComposedApp:
         click: Mapping[str, Any] | None = None,
         mcp: Mapping[str, Any] | None = None,
     ) -> "ComposedApp":
+        if mcp is not None and "page_size" in mcp:
+            raise CompositionError(
+                "MCP page_size belongs to the composed MCPAdapter, not an individual mount"
+            )
         segments = _prefix_segments(prefix)
         candidates = [
             MountedOperation(

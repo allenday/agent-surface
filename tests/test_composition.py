@@ -57,7 +57,7 @@ def test_composed_app_copies_immutable_options_for_each_route() -> None:
         child("render", "render"),
         click={"render_options": "yaml"},
     )
-    second = surface.mount("project", child("project", "run"), mcp={"page_size": 1})
+    second = surface.mount("project", child("project", "run"), mcp={"marker": "mcp"})
 
     first_route, second_route = second.operations()
 
@@ -65,10 +65,15 @@ def test_composed_app_copies_immutable_options_for_each_route() -> None:
         first_route.click_options["render_options"] = "json"  # type: ignore[index]
     assert first_route.click_options is not second_route.mcp_options
     assert first_route.click_options == {"render_options": "yaml"}
-    assert second_route.mcp_options == {"page_size": 1}
+    assert second_route.mcp_options == {"marker": "mcp"}
 
 
 @pytest.mark.parametrize("operation", ["", "render.", "render..detail"])
 def test_composed_app_rejects_malformed_child_operation_paths(operation: str) -> None:
     with pytest.raises(CompositionError, match="non-empty path segments"):
         ComposedApp("infralink").mount("diagram", child("render", operation))
+
+
+def test_composed_app_rejects_mount_local_mcp_pagination() -> None:
+    with pytest.raises(CompositionError, match="page_size belongs"):
+        ComposedApp("infralink").mount("diagram", child("render", "render"), mcp={"page_size": 1})
