@@ -1123,11 +1123,14 @@ class ClickAdapter:
 
     def _surface_context(self, context: click.Context) -> click.Context:
         current: click.Context | None = context
+        surface_context: click.Context | None = None
         while current is not None:
             command = current.command
             if isinstance(command, _SurfaceGroup) and command._adapter is self:
-                return current
+                surface_context = current
             current = current.parent
+        if surface_context is not None:
+            return surface_context
         raise AssertionError("Click adapter context is not mounted in its command tree")
 
     def _emit_error(
