@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel
 
-from agent_surface import App
+from agent_surface import App, ComposedApp
 from agent_surface.manifest import (
     ManifestCollision,
     ManifestMismatch,
@@ -64,6 +64,15 @@ def test_manifest_verification_fails_closed_for_a_substituted_app() -> None:
 
     with pytest.raises(ManifestMismatch):
         verify_manifest(substituted, document)
+
+
+def test_composed_manifest_uses_public_paths_and_verifies() -> None:
+    surface = ComposedApp("host", version="2.0.0").mount("catalog", app())
+    document = manifest_for(surface, factory="fixture.surface:build_surface")
+
+    assert document["operations"][0]["name"] == "catalog.greetings.hello"
+    assert document["operations"][0]["path"] == ["catalog", "greetings", "hello"]
+    verify_manifest(surface, document)
 
 
 def test_manifest_collection_rejects_duplicate_operation_paths() -> None:
