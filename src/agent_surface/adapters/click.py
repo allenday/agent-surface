@@ -7,7 +7,7 @@ import sys
 import types
 import typing
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
@@ -772,7 +772,7 @@ class ClickAdapter:
     def _leaf_command(self, plan: CliCommandPlan) -> click.Command:
         @click.pass_context
         def callback(context: click.Context, /, **params: Any) -> None:
-            self._invoke(context, plan, params)
+            self._invoke(context, command._plan, params)
 
         parameters = [
             _click_parameter(
@@ -796,7 +796,7 @@ class ClickAdapter:
             )
         parameters.extend(_render_parameters())
 
-        return _SurfaceCommand(
+        command = _SurfaceCommand(
             name=plan.path[-1],
             callback=callback,
             params=parameters,
@@ -804,6 +804,7 @@ class ClickAdapter:
             adapter=self,
             plan=plan,
         )
+        return command
 
     def _invoke(
         self,
@@ -822,6 +823,28 @@ class ClickAdapter:
         )
         definition = self._app.operations.describe(plan.operation)
         request: BaseModel | None = None
+        missing_shared = tuple(
+            field
+            for field in self._shared_fields
+            if field.required
+            and self._surface_context(context).get_parameter_source(field.name)
+            is not ParameterSource.COMMANDLINE
+        )
+        if missing_shared:
+            option = missing_shared[0].parameter_decls[0]
+            self._emit_error(
+                command,
+                OperationError(
+                    "usage_error",
+                    f"Missing option {option!r}.",
+                    fix=f"Provide {option} and retry.",
+                ),
+                exit_code=2,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+                definition=definition,
+            )
         try:
             payload = self._payload(context, plan, params)
         except OperationError as error:
@@ -1419,10 +1442,12 @@ class ComposedClickAdapter:
         }
 
     def command(self) -> click.Group:
-        root = click.Group(
+        root = _ComposedSurfaceGroup(
             self._app.name,
             help=f"{self._app.name} composed agent surface",
             context_settings={"help_option_names": ["-h", "--help"]},
+            params=_render_parameters(),
+            app_name=self._app.name,
         )
         mounted: set[tuple[tuple[str, ...], int]] = set()
         for route in sorted(
@@ -1440,8 +1465,9 @@ class ComposedClickAdapter:
             }
             options.update(route.options)
             command = ClickAdapter(route.app, **options).command()
+            _repath_surface_commands(command, route.mount_path)
             command.name = route.mount_path[-1]
-            parent = root
+            parent: click.Group = root
             for segment in route.mount_path[:-1]:
                 existing = parent.commands.get(segment)
                 if existing is None:
@@ -1463,6 +1489,67 @@ def _relax_group_requirements(group: click.Group) -> None:
     for parameter in group.params:
         if isinstance(parameter, click.Option):
             parameter.required = False
+
+
+def _repath_surface_commands(command: click.Command, prefix: tuple[str, ...]) -> None:
+    if isinstance(command, _SurfaceGroup):
+        command._path = (*prefix, *command._path)
+    if isinstance(command, _SurfaceCommand):
+        command._plan = replace(command._plan, path=(*prefix, *command._plan.path))
+    if isinstance(command, _SurfaceDiscoveryCommand):
+        command._path = (*prefix, *command._path)
+    if isinstance(command, click.Group):
+        for child in command.commands.values():
+            _repath_surface_commands(child, prefix)
+
+
+class _ComposedSurfaceGroup(click.Group):
+    def __init__(self, *args: Any, app_name: str, **kwargs: Any) -> None:
+        self._app_name = app_name
+        super().__init__(*args, **kwargs)
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        context = super().make_context(info_name, args, parent=parent, **extra)
+        context.meta.setdefault(_RAW_ARGV_KEY, (info_name or self._app_name, *args))
+        return context
+
+    def resolve_command(
+        self,
+        ctx: click.Context,
+        args: list[str],
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as error:
+            raw = tuple(ctx.meta.get(_RAW_ARGV_KEY, (self._app_name, *args)))
+            document_format, yaml_style = _render_choices_from_raw(raw)
+            envelope = ErrorEnvelope(
+                command=CommandView(raw=raw, parsed=ParsedCommand(path=())),
+                error=error_outcome(
+                    OperationError(
+                        "usage_error",
+                        error.format_message(),
+                        fix=f"Run {self._app_name} --help to discover commands.",
+                    )
+                ).error,
+                fix=f"Run {self._app_name} --help to discover commands.",
+            )
+            click.echo(
+                render(
+                    envelope,
+                    options=RenderOptions.model_validate(
+                        {"format": document_format, "yaml_style": yaml_style}
+                    ),
+                ),
+                nl=False,
+            )
+            raise click.exceptions.Exit(2) from None
 
 
 class _SurfaceGroup(click.Group):
