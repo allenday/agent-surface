@@ -28,6 +28,7 @@ from agent_surface.contracts import (
     SuccessEnvelope,
     SuccessOutcome,
 )
+from agent_surface.composition import ComposedApp, CompositionError, MountedOperation
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation
 from agent_surface.manifest import (
     ManifestCollision,
@@ -70,6 +71,8 @@ __all__ = [
     "BoundedCollection",
     "CanonicalEnvelopeRenderer",
     "CommandView",
+    "ComposedApp",
+    "CompositionError",
     "DuplicateReferenceCodec",
     "DenyAllActions",
     "ErrorEnvelope",
@@ -83,6 +86,7 @@ __all__ = [
     "generate_manifest",
     "installed_manifests",
     "MissingReferenceCodec",
+    "MountedOperation",
     "OperationError",
     "OperationOutcome",
     "load_manifest",
