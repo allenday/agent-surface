@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, get_args, get_origin
+from typing import Any, Literal, cast, get_args, get_origin
 
 import click
 from click.core import ParameterSource
@@ -119,8 +119,7 @@ class CliPlanCompiler:
                     )
         definitions = self._operations.list()
         paths = {
-            definition.name: self._operation_path(definition.name)
-            for definition in definitions
+            definition.name: self._operation_path(definition.name) for definition in definitions
         }
         self._validate_paths(paths)
         return tuple(
@@ -237,8 +236,12 @@ class CliPlanCompiler:
     ) -> tuple[str, ...]:
         options = cli_extra.get("options")
         if options is None:
-            return () if source == "stdin" else (name,) if kind == "argument" else (
-                f"--{name.replace('_', '-')}",
+            return (
+                ()
+                if source == "stdin"
+                else (name,)
+                if kind == "argument"
+                else (f"--{name.replace('_', '-')}",)
             )
         if kind != "option" or source != "argv":
             raise CliDefinitionError(
@@ -264,10 +267,7 @@ class CliPlanCompiler:
             raise CliDefinitionError(
                 "cli_parameter_conflict",
                 f"CLI options metadata for {name} must be unique long options",
-                fix=(
-                    "Set cli.options to a non-empty list such as "
-                    "[\"--apply\", \"--apply-changes\"]."
-                ),
+                fix=('Set cli.options to a non-empty list such as ["--apply", "--apply-changes"].'),
             )
         return tuple(options)
 
@@ -355,9 +355,7 @@ class CliPlanCompiler:
                 fix="Project at most one field from stdin for a CLI invocation.",
             )
         stdin_flags = {
-            field.stdin_flag: field
-            for field in stdin_fields
-            if field.stdin_flag is not None
+            field.stdin_flag: field for field in stdin_fields if field.stdin_flag is not None
         }
         option_fields: dict[str, CliFieldPlan] = {}
         for field in fields:
@@ -411,8 +409,7 @@ class CliPlanCompiler:
                     "cli_parameter_conflict",
                     "Destructive operation field confirm must be boolean",
                     fix=(
-                        "Declare confirm as bool or remove it and use the generated "
-                        "--confirm flag."
+                        "Declare confirm as bool or remove it and use the generated --confirm flag."
                     ),
                 )
 
@@ -777,9 +774,7 @@ class ClickAdapter:
         parameters = [
             _click_parameter(
                 field,
-                required_override=False
-                if plan.destructive and field.name == "confirm"
-                else None,
+                required_override=False if plan.destructive and field.name == "confirm" else None,
             )
             for field in plan.fields
             if field.source == "argv"
@@ -1462,11 +1457,7 @@ class ComposedClickAdapter:
             if key in mounted:
                 continue
             mounted.add(key)
-            options = {
-                name: value
-                for name, value in self._defaults.items()
-                if value is not None
-            }
+            options = {name: value for name, value in self._defaults.items() if value is not None}
             options.update(route.click_options)
             command = ClickAdapter(route.app, **options).command()
             _repath_surface_commands(command, route.mount_path)
@@ -1484,7 +1475,118 @@ class ComposedClickAdapter:
                 else:  # pragma: no cover - composition rejects leaf collisions
                     raise AssertionError("composed command path became ambiguous")
             parent.add_command(command)
+        self._add_discovery(root)
         return root
+
+    def _add_discovery(self, root: click.Group) -> None:
+        definitions = tuple(
+            replace(route.operation, name=route.public_name) for route in self._app.operations()
+        )
+        catalog = OperationCatalog(
+            cast(OperationRegistry, _PublicOperationRegistry(definitions)),
+            discovery_command=(self._app.name, "operations", "list"),
+        )
+        operations = click.Group("operations", help="Discover composed operations.")
+
+        @click.pass_context
+        def list_operations(
+            context: click.Context, /, cursor: str | None, limit: int, **params: Any
+        ) -> None:
+            raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, "operations", "list")))
+            document_format, yaml_style = _render_choices_from_raw(raw)
+            command = CommandView(
+                raw=raw,
+                parsed=ParsedCommand(
+                    path=("operations", "list"), options={"cursor": cursor, "limit": limit}
+                ),
+            )
+            try:
+                page = catalog.page(cursor=cursor, budget=OutputBudget(max_items=limit))
+                click.echo(
+                    render(
+                        SuccessEnvelope(command=command, result=page),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+            except OperationError as error:
+                click.echo(
+                    render(
+                        ErrorEnvelope(
+                            command=command, error=error_outcome(error).error, fix=error.fix
+                        ),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+                raise click.exceptions.Exit(2) from None
+
+        @click.pass_context
+        def describe_operation(context: click.Context, /, name: str, **params: Any) -> None:
+            raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, "operations", "describe")))
+            document_format, yaml_style = _render_choices_from_raw(raw)
+            command = CommandView(
+                raw=raw, parsed=ParsedCommand(path=("operations", "describe"), args={"name": name})
+            )
+            try:
+                description = catalog.describe(name)
+                click.echo(
+                    render(
+                        SuccessEnvelope(command=command, result=description),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+            except OperationError as error:
+                click.echo(
+                    render(
+                        ErrorEnvelope(
+                            command=command, error=error_outcome(error).error, fix=error.fix
+                        ),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+                raise click.exceptions.Exit(2) from None
+
+        operations.add_command(
+            click.Command(
+                "list",
+                callback=list_operations,
+                params=[*_pagination_parameters(), *_render_parameters()],
+            )
+        )
+        operations.add_command(
+            click.Command(
+                "describe",
+                callback=describe_operation,
+                params=[click.Argument(("name",)), *_render_parameters()],
+            )
+        )
+        root.add_command(operations)
+
+
+class _PublicOperationRegistry:
+    def __init__(self, definitions: tuple[OperationDefinition, ...]) -> None:
+        self._definitions = definitions
+        self._by_name = {definition.name: definition for definition in definitions}
+
+    def list(self) -> tuple[OperationDefinition, ...]:
+        return self._definitions
+
+    def describe(self, name: str) -> OperationDefinition:
+        definition = self._by_name.get(name)
+        if definition is None:
+            raise OperationError("operation_not_found", f"No operation is registered as {name}")
+        return definition
 
 
 def _relax_group_requirements(group: click.Group) -> None:
@@ -1710,9 +1812,7 @@ def _sensitive_raw_values(
                     values.append(inline_value)
                 elif index + 1 < len(raw):
                     values.append(raw[index + 1])
-            if not separator and (
-                consumes_value or name in {"--format", "--yaml-style"}
-            ):
+            if not separator and (consumes_value or name in {"--format", "--yaml-style"}):
                 index += 2
             else:
                 index += 1
@@ -1891,9 +1991,7 @@ def _read_stdin_field(field: CliFieldPlan) -> str:
 def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:
     if field.choices:
         return click.Choice(field.choices, case_sensitive=True)
-    if field.value_kind == "integer" and (
-        field.minimum is not None or field.maximum is not None
-    ):
+    if field.value_kind == "integer" and (field.minimum is not None or field.maximum is not None):
         return click.IntRange(min=field.minimum, max=field.maximum)
     return {
         "boolean": click.BOOL,
