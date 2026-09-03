@@ -15,6 +15,19 @@ from agent_surface.adapters.mcp import MCPAdapter
 adapter = MCPAdapter(app, references=references, action_provider=actions)
 ```
 
+For one public surface built from independent typed Apps, use `ComposedApp` directly. Its mounted
+public paths become MCP tool names, while each child retains its own schemas and handler:
+
+```python
+from agent_surface import ComposedApp
+
+surface = ComposedApp("infralink").mount("catalog", catalog_app)
+adapter = MCPAdapter(surface)
+```
+
+Mount-specific MCP settings belong in `mcp={...}`; Click settings belong in `click={...}`. The
+two option mappings never cross a transport boundary.
+
 ## One server for multiple typed surfaces
 
 When an application is migrating operation families independently, compose existing adapters
