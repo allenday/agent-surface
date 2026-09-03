@@ -49,3 +49,26 @@ def test_composed_app_rejects_duplicate_and_prefix_collisions() -> None:
             .mount("diagram", child("leaf", "project"))
             .mount(("diagram", "project"), child("nested", "run"))
         )
+
+
+def test_composed_app_copies_immutable_options_for_each_route() -> None:
+    surface = ComposedApp("infralink").mount(
+        "diagram",
+        child("render", "render"),
+        output="yaml",
+    )
+    second = surface.mount("project", child("project", "run"), output="json")
+
+    first_route, second_route = second.operations()
+
+    with pytest.raises(TypeError):
+        first_route.options["output"] = "json"  # type: ignore[index]
+    assert first_route.options is not second_route.options
+    assert first_route.options == {"output": "yaml"}
+    assert second_route.options == {"output": "json"}
+
+
+@pytest.mark.parametrize("operation", ["", "render.", "render..detail"])
+def test_composed_app_rejects_malformed_child_operation_paths(operation: str) -> None:
+    with pytest.raises(CompositionError, match="non-empty path segments"):
+        ComposedApp("infralink").mount("diagram", child("render", operation))

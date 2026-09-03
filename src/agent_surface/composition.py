@@ -1,6 +1,8 @@
 """Transport-neutral composition of independently typed application surfaces."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from agent_surface.app import App
@@ -18,7 +20,7 @@ class MountedOperation:
     public_path: tuple[str, ...]
     app: App
     operation: OperationDefinition
-    options: dict[str, Any]
+    options: Mapping[str, Any]
 
     @property
     def public_name(self) -> str:
@@ -42,10 +44,10 @@ class ComposedApp:
         segments = _prefix_segments(prefix)
         candidates = [
             MountedOperation(
-                public_path=(*segments, *definition.name.split(".")),
+                public_path=(*segments, *_operation_segments(definition.name)),
                 app=app,
                 operation=definition,
-                options=options,
+                options=MappingProxyType(dict(options)),
             )
             for definition in app.operations.list()
         ]
@@ -59,8 +61,15 @@ class ComposedApp:
 
 def _prefix_segments(prefix: str | tuple[str, ...]) -> tuple[str, ...]:
     segments = tuple(prefix.split(".")) if isinstance(prefix, str) else prefix
-    if not segments or any(not segment for segment in segments):
+    if not segments or any(not isinstance(segment, str) or not segment for segment in segments):
         raise CompositionError("Mount prefix must contain non-empty path segments")
+    return segments
+
+
+def _operation_segments(name: str) -> tuple[str, ...]:
+    segments = tuple(name.split("."))
+    if not segments or any(not segment for segment in segments):
+        raise CompositionError("Child operation path must contain non-empty path segments")
     return segments
 
 
