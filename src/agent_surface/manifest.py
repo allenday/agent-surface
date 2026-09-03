@@ -48,6 +48,10 @@ def manifest_for(
                     "output_schema": definition.output_model.model_json_schema(
                         mode="serialization"
                     ),
+                    "source": {
+                        "app": {"name": route.app.name, "version": route.app.version},
+                        "operation": definition.name,
+                    },
                 }
             )
     else:
@@ -194,6 +198,16 @@ def validate_manifests(manifests: Sequence[Mapping[str, Any]]) -> None:
                 operation.get("output_schema"), Mapping
             ):
                 raise ManifestMismatch("Operation manifest contains invalid JSON Schemas")
+            source = operation.get("source")
+            if source is not None:
+                source_app = source.get("app") if isinstance(source, Mapping) else None
+                if (
+                    not isinstance(source_app, Mapping)
+                    or not isinstance(source_app.get("name"), str)
+                    or not isinstance(source_app.get("version"), str)
+                    or not isinstance(source.get("operation"), str)
+                ):
+                    raise ManifestMismatch("Operation manifest contains invalid source provenance")
             paths.append(operation_path)
 
     sorted_paths = sorted(paths)

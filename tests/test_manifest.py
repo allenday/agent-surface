@@ -72,6 +72,10 @@ def test_composed_manifest_uses_public_paths_and_verifies() -> None:
 
     assert document["operations"][0]["name"] == "catalog.greetings.hello"
     assert document["operations"][0]["path"] == ["catalog", "greetings", "hello"]
+    assert document["operations"][0]["source"] == {
+        "app": {"name": "fixture", "version": "1.2.3"},
+        "operation": "greetings.hello",
+    }
     verify_manifest(surface, document)
 
 
