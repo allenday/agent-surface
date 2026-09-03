@@ -128,6 +128,7 @@ def test_composed_click_tree_keeps_child_shared_inputs_local() -> None:
     invalid_result = CliRunner().invoke(
         command, ["diagram", "render", "--region", "us-east-1", "--value", "topology"]
     )
+    discovery_result = CliRunner().invoke(command, ["operations", "list"])
 
     assert render_result.exit_code == 0
     assert YAML(typ="safe").load(render_result.stdout)["result"] == {
@@ -140,6 +141,11 @@ def test_composed_click_tree_keeps_child_shared_inputs_local() -> None:
     invalid_document = YAML(typ="safe").load(invalid_result.stdout)
     assert invalid_result.exit_code == 2
     assert invalid_document["error"]["code"] == "usage_error"
+    assert discovery_result.exit_code == 0
+    assert [
+        item["name"]
+        for item in YAML(typ="safe").load(discovery_result.stdout)["result"]["items"]
+    ] == ["diagram.project.build", "diagram.render"]
 
 
 def test_mounted_group_uses_explicit_provider_for_original_outer_argv() -> None:

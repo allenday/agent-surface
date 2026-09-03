@@ -33,8 +33,9 @@ projections; handlers never import Click or MCP.
 ## Composed applications
 
 `ComposedApp(name, version=...)` collects explicitly mounted `App` instances. Call
-`mount(prefix, app, **adapter_options)` to expose each child operation below `prefix`; string
-prefixes use dot-separated segments. `operations()` returns deterministic public routes.
+`mount(prefix, app, click={...}, mcp={...})` to expose each child operation below `prefix`; string
+prefixes use dot-separated segments. Options are explicitly scoped to their sibling projection.
+`operations()` returns deterministic public routes.
 
 Pass a `ComposedApp` to `build_click_group()` or `MCPAdapter()`. The two projections retain the
 child App's models and adapter configuration. Options passed to `mount()` override the projection
