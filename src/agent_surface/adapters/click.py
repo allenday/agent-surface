@@ -821,6 +821,7 @@ class ClickAdapter:
             params,
             transport_confirm=transport_confirm,
         )
+        document_format, yaml_style = _render_choices_from_raw(command.raw)
         definition = self._app.operations.describe(plan.operation)
         request: BaseModel | None = None
         missing_shared = tuple(
