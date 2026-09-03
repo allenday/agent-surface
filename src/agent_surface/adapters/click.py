@@ -435,8 +435,10 @@ class ClickAdapter:
         argv_provider: Callable[[], Sequence[str]] | None = None,
         envelope_renderer: CanonicalEnvelopeRenderer | None = None,
         operation_error_exit_code: Callable[[str], int] | None = None,
+        public_app_name: str | None = None,
     ) -> None:
         self._app = app
+        self._public_app_name = public_app_name or app.name
         self._references = references or ReferenceRegistry()
         self._action_provider = action_provider or NoActions()
         self._render_options = render_options or RenderOptions()
@@ -818,6 +820,8 @@ class ClickAdapter:
         )
         document_format, yaml_style = _render_choices_from_raw(command.raw)
         definition = self._app.operations.describe(plan.operation)
+        public_operation = ".".join(plan.path)
+        public_definition = replace(definition, name=public_operation)
         request: BaseModel | None = None
         missing_shared = tuple(
             field
@@ -836,10 +840,10 @@ class ClickAdapter:
                     fix=f"Provide {option} and retry.",
                 ),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
             )
         try:
             payload = self._payload(context, plan, params)
@@ -848,10 +852,10 @@ class ClickAdapter:
                 command,
                 error,
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -860,10 +864,10 @@ class ClickAdapter:
                 command,
                 OperationError(error.code, str(error), fix=error.fix),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -876,10 +880,10 @@ class ClickAdapter:
                     fix="Use a reference returned by discovery.",
                 ),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -894,10 +898,10 @@ class ClickAdapter:
                     fix="Retry with --confirm after reviewing the target.",
                 ),
                 exit_code=3,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -912,7 +916,7 @@ class ClickAdapter:
             outcome_exit_code = invocation.exit_code
             actions = _provider_actions_for(
                 self._action_provider,
-                operation=plan.operation,
+                operation=public_operation,
                 request=request,
                 result=result,
             )
@@ -927,7 +931,7 @@ class ClickAdapter:
                 envelope = self._envelope_renderer.output_model.model_validate(
                     self._envelope_renderer.render(
                         Invocation(
-                            operation=definition,
+                            operation=public_definition,
                             request=public_request(
                                 definition,
                                 request,
@@ -966,10 +970,10 @@ class ClickAdapter:
                     sensitive_values=self._sensitive_param_values(context, plan, params),
                 ),
                 exit_code=2,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -978,10 +982,10 @@ class ClickAdapter:
                 command,
                 error,
                 exit_code=70,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -995,10 +999,10 @@ class ClickAdapter:
                     sensitive_values=self._sensitive_param_values(context, plan, params),
                 ),
                 exit_code=self._exit_code_for(error),
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -1007,10 +1011,10 @@ class ClickAdapter:
                 _compact_command(command),
                 OperationError(error.code, str(error), details=(error.details,), fix=error.fix),
                 exit_code=70,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -1023,10 +1027,10 @@ class ClickAdapter:
                     fix="Retry or inspect application diagnostics.",
                 ),
                 exit_code=70,
-                operation=plan.operation,
+                operation=public_operation,
                 document_format=document_format,
                 yaml_style=yaml_style,
-                definition=definition,
+                definition=public_definition,
                 request=request,
                 sensitive_values=self._sensitive_param_values(context, plan, params),
             )
@@ -1263,6 +1267,11 @@ class ClickAdapter:
             raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
             parsed=ParsedCommand(path=plan.path),
         )
+        public_operation = ".".join(plan.path)
+        definition = replace(
+            self._app.operations.describe(plan.operation),
+            name=public_operation,
+        )
         self._emit_error(
             command,
             OperationError(
@@ -1271,13 +1280,13 @@ class ClickAdapter:
                     error.format_message(),
                     _sensitive_raw_values(raw, plan, extra_fields=self._shared_fields),
                 ),
-                fix=f"Run {self._app.name} operations describe {plan.operation}.",
+                fix=f"Run {self._public_app_name} operations describe {public_operation}.",
             ),
             exit_code=2,
-            operation=plan.operation,
+            operation=public_operation,
             document_format=document_format,
             yaml_style=yaml_style,
-            definition=self._app.operations.describe(plan.operation),
+            definition=definition,
         )
 
     def _emit_group_parse_error(
@@ -1459,7 +1468,11 @@ class ComposedClickAdapter:
             mounted.add(key)
             options = {name: value for name, value in self._defaults.items() if value is not None}
             options.update(route.click_options)
-            command = ClickAdapter(route.app, **options).command()
+            command = ClickAdapter(
+                route.app,
+                public_app_name=self._app.name,
+                **options,
+            ).command()
             _repath_surface_commands(command, route.mount_path)
             command.name = route.mount_path[-1]
             parent: click.Group = root

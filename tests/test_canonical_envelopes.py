@@ -13,12 +13,13 @@ from pydantic import BaseModel, Field
 from agent_surface import (
     App,
     CanonicalEnvelopeRenderer,
+    ComposedApp,
     Invocation,
     OperationError,
     OutputBudget,
     RenderOptions,
 )
-from agent_surface.adapters.click import ClickAdapter
+from agent_surface.adapters.click import ClickAdapter, build_click_group
 from agent_surface.adapters.mcp import MCPAdapter
 
 
@@ -64,6 +65,21 @@ class ConsumerRenderer(CanonicalEnvelopeRenderer):
             error_code=invocation.error.code if invocation.error is not None else None,
             next_action_count=invocation.next_actions.returned,
             max_bytes=invocation.budget.max_bytes,
+        )
+
+
+class FixEnvelope(BaseModel):
+    operation: str
+    fix: str | None
+
+
+class FixRenderer(CanonicalEnvelopeRenderer):
+    output_model = FixEnvelope
+
+    def render(self, invocation: Invocation) -> FixEnvelope:
+        return FixEnvelope(
+            operation=invocation.operation.name,
+            fix=invocation.error.fix if invocation.error is not None else None,
         )
 
 
@@ -133,6 +149,52 @@ def test_custom_canonical_envelope_projects_same_success_through_click_and_mcp()
     }
     assert click_document == expected
     assert mcp_document == expected
+
+
+def test_composed_click_canonical_renderer_receives_public_operation_name() -> None:
+    child = App("diagram")
+
+    @child.operation("project", read_only=True)
+    def project(request: EchoRequest) -> EchoResult:
+        return EchoResult(message=request.text)
+
+    command = build_click_group(
+        ComposedApp("infralink").mount(
+            "diagram", child, click={"envelope_renderer": ConsumerRenderer()}
+        ),
+    )
+
+    result = CliRunner().invoke(
+        command,
+        ["diagram", "project", "--text", "hello", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["operation"] == "diagram.project"
+
+
+def test_composed_click_canonical_parse_error_uses_public_operation_name() -> None:
+    child = App("diagram")
+
+    @child.operation("project", read_only=True)
+    def project(request: EchoRequest) -> EchoResult:
+        return EchoResult(message=request.text)
+
+    command = build_click_group(
+        ComposedApp("infralink").mount(
+            "diagram", child, click={"envelope_renderer": FixRenderer()}
+        ),
+    )
+
+    result = CliRunner().invoke(
+        command,
+        ["diagram", "project", "--unknown", "value", "--format", "json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.output)
+    assert document["operation"] == "diagram.project"
+    assert document["fix"] == "Run infralink operations describe diagram.project."
 
 
 def test_custom_canonical_envelope_projects_same_expected_error_through_click_and_mcp() -> None:
