@@ -158,6 +158,30 @@ def test_composed_click_canonical_renderer_receives_public_operation_name() -> N
     assert json.loads(result.output)["operation"] == "diagram.project"
 
 
+def test_composed_click_canonical_parse_error_uses_public_operation_name() -> None:
+    child = App("diagram")
+
+    @child.operation("project", read_only=True)
+    def project(request: EchoRequest) -> EchoResult:
+        return EchoResult(message=request.text)
+
+    command = build_click_group(
+        ComposedApp("infralink").mount(
+            "diagram", child, click={"envelope_renderer": ConsumerRenderer()}
+        ),
+    )
+
+    result = CliRunner().invoke(
+        command,
+        ["diagram", "project", "--unknown", "value", "--format", "json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.output)
+    assert document["operation"] == "diagram.project"
+    assert document["error_code"] == "usage_error"
+
+
 def test_custom_canonical_envelope_projects_same_expected_error_through_click_and_mcp() -> None:
     renderer = ConsumerRenderer()
     click_result = CliRunner().invoke(

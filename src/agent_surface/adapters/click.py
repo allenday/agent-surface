@@ -1265,6 +1265,11 @@ class ClickAdapter:
             raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
             parsed=ParsedCommand(path=plan.path),
         )
+        public_operation = ".".join(plan.path)
+        definition = replace(
+            self._app.operations.describe(plan.operation),
+            name=public_operation,
+        )
         self._emit_error(
             command,
             OperationError(
@@ -1276,10 +1281,10 @@ class ClickAdapter:
                 fix=f"Run {self._app.name} operations describe {plan.operation}.",
             ),
             exit_code=2,
-            operation=plan.operation,
+            operation=public_operation,
             document_format=document_format,
             yaml_style=yaml_style,
-            definition=self._app.operations.describe(plan.operation),
+            definition=definition,
         )
 
     def _emit_group_parse_error(
