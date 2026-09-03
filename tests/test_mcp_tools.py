@@ -2,7 +2,7 @@ import pytest
 from mcp import Client
 from pydantic import BaseModel, Field
 
-from agent_surface import Action, ActionCollection, App, OperationError
+from agent_surface import Action, ActionCollection, App, ComposedApp, OperationError
 from agent_surface.adapters.mcp import MCPAdapter
 
 
@@ -179,3 +179,28 @@ def test_composition_rejects_duplicate_tool_names() -> None:
 def test_composition_requires_adapters() -> None:
     with pytest.raises(ValueError, match="at least one adapter"):
         MCPAdapter.compose("combined")
+
+
+@pytest.mark.anyio
+async def test_composed_app_projects_prefixed_tools() -> None:
+    class Request(BaseModel):
+        name: str
+
+    class Result(BaseModel):
+        value: str
+
+    first = catalog_app()
+    second = App("status")
+
+    @second.operation("show")
+    def show(request: Request) -> Result:
+        return Result(value=request.name)
+
+    surface = ComposedApp("infralink").mount("catalog", first).mount("status", second)
+
+    async with Client(MCPAdapter(surface).server, raise_exceptions=True) as client:
+        tools = await client.list_tools()
+        result = await client.call_tool("status.show", {"name": "ready"})
+
+    assert [tool.name for tool in tools.tools] == ["catalog.books.search-000", "status.show"]
+    assert result.structured_content["result"] == {"value": "ready"}

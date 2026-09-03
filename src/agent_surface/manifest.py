@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_surface.app import App
+from agent_surface.composition import ComposedApp
 
 MANIFEST_FILENAME = "agent-surface-operations.json"
 
@@ -21,7 +22,7 @@ class ManifestCollision(ValueError):
 
 
 def manifest_for(
-    app: App,
+    app: App | ComposedApp,
     *,
     factory: str,
     distribution_name: str | None = None,
@@ -29,11 +30,36 @@ def manifest_for(
 ) -> dict[str, Any]:
     """Derive a stable JSON-compatible manifest from one registered application."""
     operations = []
-    for definition in app.operations.list():
-        operations.append(
-            {
-                "name": definition.name,
-                "path": definition.name.split("."),
+    if isinstance(app, ComposedApp):
+        for route in app.operations():
+            definition = route.operation
+            operations.append(
+                {
+                    "name": route.public_name,
+                    "path": list(route.public_path),
+                    "summary": definition.summary,
+                    "annotations": {
+                        "read_only": definition.read_only,
+                        "destructive": definition.destructive,
+                        "idempotent": definition.idempotent,
+                        "open_world": definition.open_world,
+                    },
+                    "input_schema": definition.input_model.model_json_schema(mode="validation"),
+                    "output_schema": definition.output_model.model_json_schema(
+                        mode="serialization"
+                    ),
+                    "source": {
+                        "app": {"name": route.app.name, "version": route.app.version},
+                        "operation": definition.name,
+                    },
+                }
+            )
+    else:
+        for definition in app.operations.list():
+            operations.append(
+                {
+                    "name": definition.name,
+                    "path": definition.name.split("."),
                 "summary": definition.summary,
                 "annotations": {
                     "read_only": definition.read_only,
@@ -43,8 +69,8 @@ def manifest_for(
                 },
                 "input_schema": definition.input_model.model_json_schema(mode="validation"),
                 "output_schema": definition.output_model.model_json_schema(mode="serialization"),
-            }
-        )
+                }
+            )
     return {
         "schema_version": 1,
         "app": {"name": app.name, "version": app.version},
@@ -58,7 +84,7 @@ def manifest_for(
 
 
 def write_manifest(
-    app: App,
+    app: App | ComposedApp,
     path: Path,
     *,
     factory: str,
@@ -96,8 +122,8 @@ def generate_manifest(
         raise ValueError("factory must use the form package.module:attribute")
     value = getattr(import_module(module_name), attribute)
     app = value() if callable(value) else value
-    if not isinstance(app, App):
-        raise TypeError("manifest factory must resolve to an App or a callable returning one")
+    if not isinstance(app, (App, ComposedApp)):
+        raise TypeError("manifest factory must resolve to an App or ComposedApp")
     write_manifest(
         app,
         path,
@@ -172,6 +198,16 @@ def validate_manifests(manifests: Sequence[Mapping[str, Any]]) -> None:
                 operation.get("output_schema"), Mapping
             ):
                 raise ManifestMismatch("Operation manifest contains invalid JSON Schemas")
+            source = operation.get("source")
+            if source is not None:
+                source_app = source.get("app") if isinstance(source, Mapping) else None
+                if (
+                    not isinstance(source_app, Mapping)
+                    or not isinstance(source_app.get("name"), str)
+                    or not isinstance(source_app.get("version"), str)
+                    or not isinstance(source.get("operation"), str)
+                ):
+                    raise ManifestMismatch("Operation manifest contains invalid source provenance")
             paths.append(operation_path)
 
     sorted_paths = sorted(paths)
@@ -180,7 +216,7 @@ def validate_manifests(manifests: Sequence[Mapping[str, Any]]) -> None:
             raise ManifestCollision(f"Operation path collision: {' '.join(path)}")
 
 
-def verify_manifest(app: App, manifest: Mapping[str, Any]) -> None:
+def verify_manifest(app: App | ComposedApp, manifest: Mapping[str, Any]) -> None:
     """Fail closed unless an explicitly imported app exactly matches its artifact."""
     factory = manifest.get("factory")
     distribution = manifest.get("distribution")

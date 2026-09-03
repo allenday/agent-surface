@@ -1,6 +1,6 @@
 """Typed application surfaces for agents."""
 
-__version__ = "0.1.12"
+__version__ = "0.2.0"
 
 from agent_surface.actions import (
     ActionCandidate,
@@ -17,6 +17,7 @@ from agent_surface.actions import (
 )
 from agent_surface.app import App
 from agent_surface.budgets import BoundedCollection, OutputBudget, OutputBudgetExceeded
+from agent_surface.composition import ComposedApp, CompositionError, MountedOperation
 from agent_surface.contracts import (
     Action,
     ActionCollection,
@@ -70,6 +71,8 @@ __all__ = [
     "BoundedCollection",
     "CanonicalEnvelopeRenderer",
     "CommandView",
+    "ComposedApp",
+    "CompositionError",
     "DuplicateReferenceCodec",
     "DenyAllActions",
     "ErrorEnvelope",
@@ -83,6 +86,7 @@ __all__ = [
     "generate_manifest",
     "installed_manifests",
     "MissingReferenceCodec",
+    "MountedOperation",
     "OperationError",
     "OperationOutcome",
     "load_manifest",

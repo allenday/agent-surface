@@ -7,10 +7,10 @@ import sys
 import types
 import typing
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, get_args, get_origin
+from typing import Any, Literal, cast, get_args, get_origin
 
 import click
 from click.core import ParameterSource
@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from agent_surface.actions import InvalidActionCursor
 from agent_surface.app import App
 from agent_surface.budgets import OutputBudget, OutputBudgetExceeded
+from agent_surface.composition import ComposedApp
 from agent_surface.contracts import CommandView, ErrorEnvelope, ParsedCommand, SuccessEnvelope
 from agent_surface.discovery import OperationCatalog
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
@@ -118,8 +119,7 @@ class CliPlanCompiler:
                     )
         definitions = self._operations.list()
         paths = {
-            definition.name: self._operation_path(definition.name)
-            for definition in definitions
+            definition.name: self._operation_path(definition.name) for definition in definitions
         }
         self._validate_paths(paths)
         return tuple(
@@ -236,8 +236,12 @@ class CliPlanCompiler:
     ) -> tuple[str, ...]:
         options = cli_extra.get("options")
         if options is None:
-            return () if source == "stdin" else (name,) if kind == "argument" else (
-                f"--{name.replace('_', '-')}",
+            return (
+                ()
+                if source == "stdin"
+                else (name,)
+                if kind == "argument"
+                else (f"--{name.replace('_', '-')}",)
             )
         if kind != "option" or source != "argv":
             raise CliDefinitionError(
@@ -263,10 +267,7 @@ class CliPlanCompiler:
             raise CliDefinitionError(
                 "cli_parameter_conflict",
                 f"CLI options metadata for {name} must be unique long options",
-                fix=(
-                    "Set cli.options to a non-empty list such as "
-                    "[\"--apply\", \"--apply-changes\"]."
-                ),
+                fix=('Set cli.options to a non-empty list such as ["--apply", "--apply-changes"].'),
             )
         return tuple(options)
 
@@ -354,9 +355,7 @@ class CliPlanCompiler:
                 fix="Project at most one field from stdin for a CLI invocation.",
             )
         stdin_flags = {
-            field.stdin_flag: field
-            for field in stdin_fields
-            if field.stdin_flag is not None
+            field.stdin_flag: field for field in stdin_fields if field.stdin_flag is not None
         }
         option_fields: dict[str, CliFieldPlan] = {}
         for field in fields:
@@ -410,8 +409,7 @@ class CliPlanCompiler:
                     "cli_parameter_conflict",
                     "Destructive operation field confirm must be boolean",
                     fix=(
-                        "Declare confirm as bool or remove it and use the generated "
-                        "--confirm flag."
+                        "Declare confirm as bool or remove it and use the generated --confirm flag."
                     ),
                 )
 
@@ -771,14 +769,12 @@ class ClickAdapter:
     def _leaf_command(self, plan: CliCommandPlan) -> click.Command:
         @click.pass_context
         def callback(context: click.Context, /, **params: Any) -> None:
-            self._invoke(context, plan, params)
+            self._invoke(context, command._plan, params)
 
         parameters = [
             _click_parameter(
                 field,
-                required_override=False
-                if plan.destructive and field.name == "confirm"
-                else None,
+                required_override=False if plan.destructive and field.name == "confirm" else None,
             )
             for field in plan.fields
             if field.source == "argv"
@@ -795,7 +791,7 @@ class ClickAdapter:
             )
         parameters.extend(_render_parameters())
 
-        return _SurfaceCommand(
+        command = _SurfaceCommand(
             name=plan.path[-1],
             callback=callback,
             params=parameters,
@@ -803,6 +799,7 @@ class ClickAdapter:
             adapter=self,
             plan=plan,
         )
+        return command
 
     def _invoke(
         self,
@@ -819,8 +816,31 @@ class ClickAdapter:
             params,
             transport_confirm=transport_confirm,
         )
+        document_format, yaml_style = _render_choices_from_raw(command.raw)
         definition = self._app.operations.describe(plan.operation)
         request: BaseModel | None = None
+        missing_shared = tuple(
+            field
+            for field in self._shared_fields
+            if field.required
+            and self._surface_context(context).get_parameter_source(field.name)
+            is not ParameterSource.COMMANDLINE
+        )
+        if missing_shared:
+            option = missing_shared[0].parameter_decls[0]
+            self._emit_error(
+                command,
+                OperationError(
+                    "usage_error",
+                    f"Missing option {option!r}.",
+                    fix=f"Provide {option} and retry.",
+                ),
+                exit_code=2,
+                operation=plan.operation,
+                document_format=document_format,
+                yaml_style=yaml_style,
+                definition=definition,
+            )
         try:
             payload = self._payload(context, plan, params)
         except OperationError as error:
@@ -1038,7 +1058,7 @@ class ClickAdapter:
         return payload
 
     def _shared_payload(self, context: click.Context) -> dict[str, Any]:
-        root = context.find_root()
+        root = self._surface_context(context)
         payload: dict[str, Any] = {}
         for field in self._shared_fields:
             if root.get_parameter_source(field.name) is not ParameterSource.COMMANDLINE:
@@ -1066,7 +1086,7 @@ class ClickAdapter:
         arguments: dict[str, Any] = {}
         options: dict[str, Any] = {}
         flags = []
-        root = context.find_root()
+        root = self._surface_context(context)
         for field in self._shared_fields:
             if root.get_parameter_source(field.name) is ParameterSource.COMMANDLINE:
                 options[field.name] = _REDACTED if field.sensitive else root.params[field.name]
@@ -1096,6 +1116,18 @@ class ClickAdapter:
                 flags=tuple(flags),
             ),
         )
+
+    def _surface_context(self, context: click.Context) -> click.Context:
+        current: click.Context | None = context
+        surface_context: click.Context | None = None
+        while current is not None:
+            command = current.command
+            if isinstance(command, _SurfaceGroup) and command._adapter is self:
+                surface_context = current
+            current = current.parent
+        if surface_context is not None:
+            return surface_context
+        raise AssertionError("Click adapter context is not mounted in its command tree")
 
     def _emit_error(
         self,
@@ -1364,13 +1396,21 @@ class ClickAdapter:
 
 
 def build_click_group(
-    app: App,
+    app: App | ComposedApp,
     *,
     references: ReferenceRegistry | None = None,
     action_provider: ActionProvider | None = None,
     render_options: RenderOptions | None = None,
     argv_provider: Callable[[], Sequence[str]] | None = None,
 ) -> click.Group:
+    if isinstance(app, ComposedApp):
+        return ComposedClickAdapter(
+            app,
+            references=references,
+            action_provider=action_provider,
+            render_options=render_options,
+            argv_provider=argv_provider,
+        ).command()
     return ClickAdapter(
         app,
         references=references,
@@ -1378,6 +1418,244 @@ def build_click_group(
         render_options=render_options,
         argv_provider=argv_provider,
     ).command()
+
+
+class ComposedClickAdapter:
+    """Mount independently configured Click projections into one command tree."""
+
+    def __init__(
+        self,
+        app: ComposedApp,
+        *,
+        references: ReferenceRegistry | None = None,
+        action_provider: ActionProvider | None = None,
+        render_options: RenderOptions | None = None,
+        argv_provider: Callable[[], Sequence[str]] | None = None,
+    ) -> None:
+        self._app = app
+        self._defaults: dict[str, Any] = {
+            "references": references,
+            "action_provider": action_provider,
+            "render_options": render_options,
+            "argv_provider": argv_provider,
+        }
+
+    def command(self) -> click.Group:
+        root = _ComposedSurfaceGroup(
+            self._app.name,
+            help=f"{self._app.name} composed agent surface",
+            context_settings={"help_option_names": ["-h", "--help"]},
+            params=_render_parameters(),
+            app_name=self._app.name,
+        )
+        mounted: set[tuple[tuple[str, ...], int]] = set()
+        for route in sorted(
+            self._app.operations(),
+            key=lambda item: (len(item.mount_path), item.mount_path, item.public_path),
+        ):
+            key = (route.mount_path, id(route.app))
+            if key in mounted:
+                continue
+            mounted.add(key)
+            options = {name: value for name, value in self._defaults.items() if value is not None}
+            options.update(route.click_options)
+            command = ClickAdapter(route.app, **options).command()
+            _repath_surface_commands(command, route.mount_path)
+            command.name = route.mount_path[-1]
+            parent: click.Group = root
+            for segment in route.mount_path[:-1]:
+                existing = parent.commands.get(segment)
+                if existing is None:
+                    group = click.Group(segment)
+                    parent.add_command(group)
+                    parent = group
+                elif isinstance(existing, click.Group):
+                    _relax_group_requirements(existing)
+                    parent = existing
+                else:  # pragma: no cover - composition rejects leaf collisions
+                    raise AssertionError("composed command path became ambiguous")
+            parent.add_command(command)
+        self._add_discovery(root)
+        return root
+
+    def _add_discovery(self, root: click.Group) -> None:
+        definitions = tuple(
+            replace(route.operation, name=route.public_name) for route in self._app.operations()
+        )
+        catalog = OperationCatalog(
+            cast(OperationRegistry, _PublicOperationRegistry(definitions)),
+            discovery_command=(self._app.name, "operations", "list"),
+        )
+        operations = click.Group("operations", help="Discover composed operations.")
+
+        @click.pass_context
+        def list_operations(
+            context: click.Context, /, cursor: str | None, limit: int, **params: Any
+        ) -> None:
+            raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, "operations", "list")))
+            document_format, yaml_style = _render_choices_from_raw(raw)
+            command = CommandView(
+                raw=raw,
+                parsed=ParsedCommand(
+                    path=("operations", "list"), options={"cursor": cursor, "limit": limit}
+                ),
+            )
+            try:
+                page = catalog.page(cursor=cursor, budget=OutputBudget(max_items=limit))
+                click.echo(
+                    render(
+                        SuccessEnvelope(command=command, result=page),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+            except OperationError as error:
+                click.echo(
+                    render(
+                        ErrorEnvelope(
+                            command=command, error=error_outcome(error).error, fix=error.fix
+                        ),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+                raise click.exceptions.Exit(2) from None
+
+        @click.pass_context
+        def describe_operation(context: click.Context, /, name: str, **params: Any) -> None:
+            raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, "operations", "describe")))
+            document_format, yaml_style = _render_choices_from_raw(raw)
+            command = CommandView(
+                raw=raw, parsed=ParsedCommand(path=("operations", "describe"), args={"name": name})
+            )
+            try:
+                description = catalog.describe(name)
+                click.echo(
+                    render(
+                        SuccessEnvelope(command=command, result=description),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+            except OperationError as error:
+                click.echo(
+                    render(
+                        ErrorEnvelope(
+                            command=command, error=error_outcome(error).error, fix=error.fix
+                        ),
+                        options=RenderOptions.model_validate(
+                            {"format": document_format, "yaml_style": yaml_style}
+                        ),
+                    ),
+                    nl=False,
+                )
+                raise click.exceptions.Exit(2) from None
+
+        operations.add_command(
+            click.Command(
+                "list",
+                callback=list_operations,
+                params=[*_pagination_parameters(), *_render_parameters()],
+            )
+        )
+        operations.add_command(
+            click.Command(
+                "describe",
+                callback=describe_operation,
+                params=[click.Argument(("name",)), *_render_parameters()],
+            )
+        )
+        root.add_command(operations)
+
+
+class _PublicOperationRegistry:
+    def __init__(self, definitions: tuple[OperationDefinition, ...]) -> None:
+        self._definitions = definitions
+        self._by_name = {definition.name: definition for definition in definitions}
+
+    def list(self) -> tuple[OperationDefinition, ...]:
+        return self._definitions
+
+    def describe(self, name: str) -> OperationDefinition:
+        definition = self._by_name.get(name)
+        if definition is None:
+            raise OperationError("operation_not_found", f"No operation is registered as {name}")
+        return definition
+
+
+def _relax_group_requirements(group: click.Group) -> None:
+    """Allow a mounted child namespace to contain another independently typed App."""
+
+    for parameter in group.params:
+        if isinstance(parameter, click.Option):
+            parameter.required = False
+
+
+def _repath_surface_commands(command: click.Command, prefix: tuple[str, ...]) -> None:
+    if isinstance(command, _SurfaceGroup):
+        command._path = (*prefix, *command._path)
+    if isinstance(command, _SurfaceCommand):
+        command._plan = replace(command._plan, path=(*prefix, *command._plan.path))
+    if isinstance(command, _SurfaceDiscoveryCommand):
+        command._path = (*prefix, *command._path)
+    if isinstance(command, click.Group):
+        for child in command.commands.values():
+            _repath_surface_commands(child, prefix)
+
+
+class _ComposedSurfaceGroup(click.Group):
+    def __init__(self, *args: Any, app_name: str, **kwargs: Any) -> None:
+        self._app_name = app_name
+        super().__init__(*args, **kwargs)
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        context = super().make_context(info_name, args, parent=parent, **extra)
+        context.meta.setdefault(_RAW_ARGV_KEY, (info_name or self._app_name, *args))
+        return context
+
+    def resolve_command(
+        self,
+        ctx: click.Context,
+        args: list[str],
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as error:
+            raw = tuple(ctx.meta.get(_RAW_ARGV_KEY, (self._app_name, *args)))
+            document_format, yaml_style = _render_choices_from_raw(raw)
+            envelope = ErrorEnvelope(
+                command=CommandView(raw=raw, parsed=ParsedCommand(path=())),
+                error=error_outcome(
+                    OperationError(
+                        "usage_error",
+                        error.format_message(),
+                        fix=f"Run {self._app_name} --help to discover commands.",
+                    )
+                ).error,
+                fix=f"Run {self._app_name} --help to discover commands.",
+            )
+            click.echo(
+                render(
+                    envelope,
+                    options=RenderOptions.model_validate(
+                        {"format": document_format, "yaml_style": yaml_style}
+                    ),
+                ),
+                nl=False,
+            )
+            raise click.exceptions.Exit(2) from None
 
 
 class _SurfaceGroup(click.Group):
@@ -1534,9 +1812,7 @@ def _sensitive_raw_values(
                     values.append(inline_value)
                 elif index + 1 < len(raw):
                     values.append(raw[index + 1])
-            if not separator and (
-                consumes_value or name in {"--format", "--yaml-style"}
-            ):
+            if not separator and (consumes_value or name in {"--format", "--yaml-style"}):
                 index += 2
             else:
                 index += 1
@@ -1715,9 +1991,7 @@ def _read_stdin_field(field: CliFieldPlan) -> str:
 def _click_type(field: CliFieldPlan) -> click.ParamType[Any]:
     if field.choices:
         return click.Choice(field.choices, case_sensitive=True)
-    if field.value_kind == "integer" and (
-        field.minimum is not None or field.maximum is not None
-    ):
+    if field.value_kind == "integer" and (field.minimum is not None or field.maximum is not None):
         return click.IntRange(min=field.minimum, max=field.maximum)
     return {
         "boolean": click.BOOL,

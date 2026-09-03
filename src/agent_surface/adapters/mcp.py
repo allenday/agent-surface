@@ -4,8 +4,8 @@ import base64
 import binascii
 import json
 from contextlib import suppress
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -21,6 +21,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised in subproce
 
 from agent_surface.app import App
 from agent_surface.budgets import OutputBudgetExceeded
+from agent_surface.composition import ComposedApp
 from agent_surface.contracts import ErrorOutcome, SuccessOutcome
 from agent_surface.envelopes import CanonicalEnvelopeRenderer, Invocation, public_request
 from agent_surface.operations import OperationDefinition, OperationError
@@ -48,7 +49,7 @@ class MCPAdapter:
 
     def __init__(
         self,
-        app: App,
+        app: App | ComposedApp,
         *,
         page_size: int = 20,
         references: ReferenceRegistry | None = None,
@@ -69,9 +70,47 @@ class MCPAdapter:
                 "structured error can always be emitted"
             )
         self._page_size = page_size
-        self._plans = tuple(self._compile_tool(item) for item in app.operations.list())
-        self._definitions = {item.name: item for item in app.operations.list()}
-        self._composed_adapters: dict[str, MCPAdapter] | None = None
+        self._composition_defaults = {
+            "page_size": page_size,
+            "references": references,
+            "action_provider": action_provider,
+            "render_options": render_options,
+            "envelope_renderer": envelope_renderer,
+        }
+        self._plans: tuple[MCPToolPlan, ...]
+        self._definitions: dict[str, OperationDefinition]
+        self._composed_adapters: dict[str, tuple[MCPAdapter, str]] | None = None
+        if isinstance(app, ComposedApp):
+            dispatch: dict[str, tuple[MCPAdapter, str]] = {}
+            plans: list[MCPToolPlan] = []
+            mounted: set[tuple[tuple[str, ...], int]] = set()
+            for route in app.operations():
+                key = (route.mount_path, id(route.app))
+                if key in mounted:
+                    continue
+                mounted.add(key)
+                options = {
+                    name: value
+                    for name, value in self._composition_defaults.items()
+                    if value is not None
+                }
+                options.update(route.mcp_options)
+                adapter = MCPAdapter(route.app, **cast(Any, options))
+                for plan in adapter._plans:
+                    public_name = ".".join((*route.mount_path, *plan.operation.split(".")))
+                    dispatch[public_name] = (adapter, plan.operation)
+                    plans.append(
+                        MCPToolPlan(
+                            operation=public_name,
+                            tool=plan.tool.model_copy(update={"name": public_name}),
+                        )
+                    )
+            self._plans = tuple(sorted(plans, key=lambda plan: plan.operation))
+            self._definitions = {}
+            self._composed_adapters = dispatch
+        else:
+            self._plans = tuple(self._compile_tool(item) for item in app.operations.list())
+            self._definitions = {item.name: item for item in app.operations.list()}
         self._server: Server[Any] = Server(
             app.name,
             version=app.version,
@@ -116,7 +155,9 @@ class MCPAdapter:
         composed._page_size = page_size
         composed._plans = tuple(sorted(plans, key=lambda plan: plan.operation))
         composed._definitions = {}
-        composed._composed_adapters = dispatch
+        composed._composed_adapters = {
+            name: (adapter, name) for name, adapter in dispatch.items()
+        }
         composed._server = Server(
             name,
             version=version,
@@ -166,16 +207,29 @@ class MCPAdapter:
         self,
         context: Any,
         params: types.CallToolRequestParams,
+        *,
+        public_operation: str | None = None,
     ) -> types.CallToolResult:
         if self._composed_adapters is not None:
-            adapter = self._composed_adapters.get(params.name)
-            if adapter is None:
+            mounted = self._composed_adapters.get(params.name)
+            if mounted is None:
                 raise MCPError(types.INVALID_PARAMS, f"Unknown tool: {params.name}")
-            return await adapter._call_tool(context, params)
+            adapter, operation = mounted
+            return await adapter._call_tool(
+                context,
+                params.model_copy(update={"name": operation}),
+                public_operation=params.name,
+            )
         del context
-        definition = self._definitions.get(params.name)
-        if definition is None:
+        assert isinstance(self._app, App)
+        source_definition = self._definitions.get(params.name)
+        if source_definition is None:
             raise MCPError(types.INVALID_PARAMS, f"Unknown tool: {params.name}")
+        definition = (
+            replace(source_definition, name=public_operation)
+            if public_operation is not None
+            else source_definition
+        )
         arguments = dict(params.arguments or {})
         confirm_field = definition.input_model.model_fields.get("confirm")
         confirmed = arguments.get("confirm") is True

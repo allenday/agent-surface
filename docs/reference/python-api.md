@@ -5,6 +5,7 @@ The public surface is organized around a few concepts:
 | Type | Purpose |
 | --- | --- |
 | `App` | register and directly invoke typed operations |
+| `ComposedApp` | mount independent Apps into one public operation namespace |
 | `OperationError` | stable expected failure with repair guidance |
 | `OperationOutcome` | a valid result with an explicit non-zero process classification |
 | `ReferenceCodec`, `ReferenceRegistry` | encode, decode, and display domain references |
@@ -28,6 +29,21 @@ async def search(request: SearchRequest) -> SearchPage:
 Use `app.invoke("books.search", request)` for direct Python calls. Build a CLI with
 `build_click_group(app, references=references, action_provider=actions)`. Adapters are sibling
 projections; handlers never import Click or MCP.
+
+## Composed applications
+
+`ComposedApp(name, version=...)` collects explicitly mounted `App` instances. Call
+`mount(prefix, app, click={...}, mcp={...})` to expose each child operation below `prefix`; string
+prefixes use dot-separated segments. Options are explicitly scoped to their sibling projection.
+`operations()` returns deterministic public routes.
+
+Pass a `ComposedApp` to `build_click_group()` or `MCPAdapter()`. The two projections retain the
+child App's models and adapter configuration. Options passed to `mount()` override the projection
+defaults passed at construction. Public CLI paths and MCP tool names use the same mounted path.
+Use `manifest_for()` and `verify_manifest()` with a `ComposedApp` when packaging a composed host.
+
+See [typed app composition](../concepts/app-composition.md) for when composition is preferable to
+one App with a shared input model.
 
 ## Successful negative domain states
 

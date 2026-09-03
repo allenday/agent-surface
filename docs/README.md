@@ -19,6 +19,9 @@ identity or scoped action discovery.
 For a host that discovers separately installed application packages, use the
 [operation manifest reference](reference/operation-manifests.md).
 
+When one host combines independently typed application areas, read
+[typed app composition](concepts/app-composition.md).
+
 ## Connect
 
 Use the [bookstore MCP integration](tutorials/bookstore.md#connect-codex-and-claude-code) for a
