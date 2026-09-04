@@ -1899,12 +1899,22 @@ def _redact_unknown_options(
             elif index + 1 < len(redacted) and not redacted[index + 1].startswith("--"):
                 redacted[index + 1] = _REDACTED
                 index += 1
+        elif token.startswith("-") and token != "-":
+            option = token[:2]
+            suffix = token[2:]
+            if suffix:
+                separator = "=" if suffix.startswith("=") else ""
+                redacted[index] = f"{option}{separator}<redacted>"
+            elif index + 1 < len(redacted) and not redacted[index + 1].startswith("-"):
+                redacted[index + 1] = _REDACTED
+                index += 1
         index += 1
     return tuple(redacted)
 
 
 def _redact_unknown_option_text(value: str) -> str:
-    return re.sub(r"(--[^=\s]+)=\S+", r"\1=<redacted>", value)
+    value = re.sub(r"(--[^=\s]+)=\S+", r"\1=<redacted>", value)
+    return re.sub(r"(-[^=\s])=\S+", r"\1=<redacted>", value)
 
 
 def _render_choices_from_raw(raw: tuple[str, ...]) -> tuple[str, str]:

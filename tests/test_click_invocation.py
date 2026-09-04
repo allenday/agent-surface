@@ -325,7 +325,13 @@ def test_root_and_discovery_group_option_errors_are_structured_and_redacted() ->
 
 @pytest.mark.parametrize(
     "unknown_option",
-    [["--password=canary-secret"], ["--password", "canary-secret"]],
+    [
+        ["--password=canary-secret"],
+        ["--password", "canary-secret"],
+        ["-p=canary-secret"],
+        ["-p", "canary-secret"],
+        ["-pcanary-secret"],
+    ],
 )
 def test_leaf_parse_error_redacts_unknown_option_values(unknown_option: list[str]) -> None:
     result, document = invoke_json(
