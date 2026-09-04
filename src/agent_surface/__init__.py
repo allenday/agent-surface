@@ -1,6 +1,6 @@
 """Typed application surfaces for agents."""
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 from agent_surface.actions import (
     ActionCandidate,

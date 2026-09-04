@@ -323,6 +323,28 @@ def test_root_and_discovery_group_option_errors_are_structured_and_redacted() ->
         assert "<redacted>" in result.output
 
 
+@pytest.mark.parametrize(
+    "unknown_option",
+    [
+        ["--password=canary-secret"],
+        ["--password", "canary-secret"],
+        ["-p=canary-secret"],
+        ["-p", "canary-secret"],
+        ["-pcanary-secret"],
+    ],
+)
+def test_leaf_parse_error_redacts_unknown_option_values(unknown_option: list[str]) -> None:
+    result, document = invoke_json(
+        echo_app(),
+        ["message", "echo", "--text", "hello", *unknown_option],
+    )
+
+    assert result.exit_code == 2
+    assert document["error"]["code"] == "usage_error"
+    assert "canary-secret" not in result.output
+    assert "<redacted>" in result.output
+
+
 def test_unexpected_failure_is_structured_without_private_details() -> None:
     result, document = invoke_json(
         echo_app(),
