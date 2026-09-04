@@ -1278,7 +1278,10 @@ class ClickAdapter:
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *plan.path)))
         document_format, yaml_style = _render_choices_from_raw(raw)
         command = CommandView(
-            raw=_redact_raw(raw, plan, extra_fields=self._shared_fields),
+            raw=_redact_unknown_options(
+                _redact_raw(raw, plan, extra_fields=self._shared_fields),
+                known_options=_known_options((*self._shared_fields, *plan.fields)),
+            ),
             parsed=ParsedCommand(path=plan.path),
         )
         public_operation = ".".join(plan.path)
@@ -1290,9 +1293,11 @@ class ClickAdapter:
             command,
             OperationError(
                 "usage_error",
-                _redact_text(
-                    error.format_message(),
-                    _sensitive_raw_values(raw, plan, extra_fields=self._shared_fields),
+                _redact_unknown_option_text(
+                    _redact_text(
+                        error.format_message(),
+                        _sensitive_raw_values(raw, plan, extra_fields=self._shared_fields),
+                    )
                 ),
                 fix=f"Run {self._public_app_name} operations describe {public_operation}.",
             ),
@@ -1813,6 +1818,15 @@ def _redact_raw(
     return redacted
 
 
+def _known_options(fields: tuple[CliFieldPlan, ...]) -> set[str]:
+    return {
+        option
+        for field in fields
+        if field.source == "argv" and field.kind == "option"
+        for option in _option_declarations(field)
+    }
+
+
 def _sensitive_raw_values(
     raw: tuple[str, ...],
     plan: CliCommandPlan,
@@ -1865,14 +1879,19 @@ def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
     return value
 
 
-def _redact_unknown_options(raw: tuple[str, ...]) -> tuple[str, ...]:
+def _redact_unknown_options(
+    raw: tuple[str, ...],
+    *,
+    known_options: set[str] | None = None,
+) -> tuple[str, ...]:
     redacted = list(raw)
+    known = {"--format", "--yaml-style", *(known_options or set())}
     index = 0
     while index < len(redacted):
         token = redacted[index]
         if token.startswith("--"):
             name, separator, _value = token.partition("=")
-            if name in {"--format", "--yaml-style"}:
+            if name in known:
                 index += 1
                 continue
             if separator:
