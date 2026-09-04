@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import math
+import re
 import sys
 import types
 import typing
@@ -45,6 +46,19 @@ _RAW_ARGV_KEY = "agent_surface.raw_argv"
 _REDACTED = "<redacted>"
 _MIN_CLI_BYTES = 1_024
 _DEFAULT_STDIN_MAX_BYTES = 8_192
+
+
+class _ParserErrorRequest(BaseModel):
+    pass
+
+
+class _ParserErrorResult(BaseModel):
+    pass
+
+
+def _parser_error_handler(request: _ParserErrorRequest) -> _ParserErrorResult:
+    del request
+    return _ParserErrorResult()
 
 
 class CliDefinitionError(Exception):
@@ -1293,21 +1307,33 @@ class ClickAdapter:
         self,
         context: click.Context,
         path: tuple[str, ...],
-        error: click.UsageError,
+        error: click.ClickException,
     ) -> typing.Never:
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
         document_format, yaml_style = _render_choices_from_raw(raw)
+        public_operation = ".".join(path) or self._public_app_name
         self._emit_error(
-            CommandView(raw=raw, parsed=ParsedCommand(path=path)),
+            CommandView(raw=_redact_unknown_options(raw), parsed=ParsedCommand(path=path)),
             OperationError(
                 "usage_error",
-                error.format_message(),
-                fix=f"Run {self._app.name} operations list to discover valid commands.",
+                _redact_unknown_option_text(error.format_message()),
+                fix=f"Run {self._public_app_name} operations list to discover valid commands.",
             ),
             exit_code=2,
-            operation=".".join(path),
+            operation=public_operation,
             document_format=document_format,
             yaml_style=yaml_style,
+            definition=self._parser_error_definition(public_operation),
+        )
+
+    @staticmethod
+    def _parser_error_definition(name: str) -> OperationDefinition:
+        return OperationDefinition(
+            name=name,
+            summary="",
+            handler=cast(Any, _parser_error_handler),
+            input_model=_ParserErrorRequest,
+            output_model=_ParserErrorResult,
         )
 
     def _emit_discovery_parse_error(
@@ -1316,20 +1342,7 @@ class ClickAdapter:
         path: tuple[str, ...],
         error: click.ClickException,
     ) -> typing.Never:
-        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
-        document_format, yaml_style = _render_choices_from_raw(raw)
-        self._emit_error(
-            CommandView(raw=raw, parsed=ParsedCommand(path=path)),
-            OperationError(
-                "usage_error",
-                error.format_message(),
-                fix=f"Run {self._app.name} {path[0]} --help for valid usage.",
-            ),
-            exit_code=2,
-            operation=".".join(path),
-            document_format=document_format,
-            yaml_style=yaml_style,
-        )
+        self._emit_group_parse_error(context, path, error)
 
     def _selected_render_options(self, document_format: str, yaml_style: str) -> RenderOptions:
         return self._render_options.model_copy(
@@ -1705,6 +1718,13 @@ class _SurfaceGroup(click.Group):
         except click.UsageError as error:
             self._adapter._emit_group_parse_error(ctx, self._path, error)
 
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        ctx.meta.setdefault(_RAW_ARGV_KEY, self._adapter._capture_raw(ctx.info_name, args))
+        try:
+            return super().parse_args(ctx, args)
+        except click.UsageError as error:
+            self._adapter._emit_group_parse_error(ctx, self._path, error)
+
 
 class _SurfaceCommand(click.Command):
     def __init__(
@@ -1843,6 +1863,29 @@ def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
     for secret in secrets:
         value = value.replace(secret, _REDACTED)
     return value
+
+
+def _redact_unknown_options(raw: tuple[str, ...]) -> tuple[str, ...]:
+    redacted = list(raw)
+    index = 0
+    while index < len(redacted):
+        token = redacted[index]
+        if token.startswith("--"):
+            name, separator, _value = token.partition("=")
+            if name in {"--format", "--yaml-style"}:
+                index += 1
+                continue
+            if separator:
+                redacted[index] = f"{name}=<redacted>"
+            elif index + 1 < len(redacted) and not redacted[index + 1].startswith("--"):
+                redacted[index + 1] = _REDACTED
+                index += 1
+        index += 1
+    return tuple(redacted)
+
+
+def _redact_unknown_option_text(value: str) -> str:
+    return re.sub(r"(--[^=\s]+)=\S+", r"\1=<redacted>", value)
 
 
 def _render_choices_from_raw(raw: tuple[str, ...]) -> tuple[str, str]:

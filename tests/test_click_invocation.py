@@ -306,6 +306,23 @@ def test_unknown_nested_command_is_a_repairable_structured_document() -> None:
     assert document["fix"]
 
 
+def test_root_and_discovery_group_option_errors_are_structured_and_redacted() -> None:
+    command = ClickAdapter(echo_app()).command()
+
+    root = CliRunner().invoke(command, ["--password=canary-secret", "--format", "json"])
+    discovery = CliRunner().invoke(
+        command,
+        ["actions", "--password", "canary-secret", "--format", "json"],
+    )
+
+    for result in (root, discovery):
+        assert result.exit_code == 2
+        document = json.loads(result.output)
+        assert document["error"]["code"] == "usage_error"
+        assert "canary-secret" not in result.output
+        assert "<redacted>" in result.output
+
+
 def test_unexpected_failure_is_structured_without_private_details() -> None:
     result, document = invoke_json(
         echo_app(),
