@@ -209,6 +209,19 @@ def test_root_parse_error_uses_the_configured_canonical_renderer() -> None:
     assert document["error_code"] == "usage_error"
 
 
+def test_discovery_parse_error_uses_canonical_renderer_and_redacts_unknown_value() -> None:
+    result = CliRunner().invoke(
+        ClickAdapter(app(), envelope_renderer=ConsumerRenderer()).command(),
+        ["operations", "list", "--format-secret=canary-secret", "--format", "json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.output)
+    assert document["schema_version"] == "consumer.example/v1"
+    assert document["error_code"] == "usage_error"
+    assert "canary-secret" not in result.output
+
+
 def test_custom_canonical_envelope_projects_same_expected_error_through_click_and_mcp() -> None:
     renderer = ConsumerRenderer()
     click_result = CliRunner().invoke(

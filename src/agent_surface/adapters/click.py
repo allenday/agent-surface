@@ -1307,7 +1307,7 @@ class ClickAdapter:
         self,
         context: click.Context,
         path: tuple[str, ...],
-        error: click.UsageError,
+        error: click.ClickException,
     ) -> typing.Never:
         raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
         document_format, yaml_style = _render_choices_from_raw(raw)
@@ -1342,20 +1342,7 @@ class ClickAdapter:
         path: tuple[str, ...],
         error: click.ClickException,
     ) -> typing.Never:
-        raw = tuple(context.meta.get(_RAW_ARGV_KEY, (self._app.name, *path)))
-        document_format, yaml_style = _render_choices_from_raw(raw)
-        self._emit_error(
-            CommandView(raw=raw, parsed=ParsedCommand(path=path)),
-            OperationError(
-                "usage_error",
-                error.format_message(),
-                fix=f"Run {self._app.name} {path[0]} --help for valid usage.",
-            ),
-            exit_code=2,
-            operation=".".join(path),
-            document_format=document_format,
-            yaml_style=yaml_style,
-        )
+        self._emit_group_parse_error(context, path, error)
 
     def _selected_render_options(self, document_format: str, yaml_style: str) -> RenderOptions:
         return self._render_options.model_copy(
@@ -1883,8 +1870,11 @@ def _redact_unknown_options(raw: tuple[str, ...]) -> tuple[str, ...]:
     index = 0
     while index < len(redacted):
         token = redacted[index]
-        if token.startswith("--") and not token.startswith(("--format", "--yaml-style")):
+        if token.startswith("--"):
             name, separator, _value = token.partition("=")
+            if name in {"--format", "--yaml-style"}:
+                index += 1
+                continue
             if separator:
                 redacted[index] = f"{name}=<redacted>"
             elif index + 1 < len(redacted) and not redacted[index + 1].startswith("--"):
